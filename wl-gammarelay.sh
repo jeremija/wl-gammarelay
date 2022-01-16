@@ -23,4 +23,5 @@ fi
 temperature=${1:-6500}
 brightness=${2:-+0}
 
+cat /dev/null > $input_file
 echo $temperature $brightness >> $input_file
