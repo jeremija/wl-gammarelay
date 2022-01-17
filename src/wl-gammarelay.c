@@ -451,10 +451,28 @@ static int adjust_temperature(struct wl_display *display, color_setting_t settin
 	return EXIT_SUCCESS;
 }
 
-/* static const char usage[] = "usage: gamma-control [options]\n" */
-/* 	"  -h          show this help message\n" */
-/* 	"  -t          set temperature (default: 6500)\n" */
-/* 	"  -b          set brighntess (default: 1.0)\n"; */
+static const char usage[] = "usage: wl-gammarelay\n"
+	"  -h          show this help message\n"
+	"\n"
+	"This process expects input from stdin in the form of:\n"
+	"\n"
+	"  <temperature> [brightness]"
+	"\n"
+	"Each input must end with a new line character\n"
+	"\n"
+	"Temperature is an integer, brightness is a float from 0 to 1.0.\n"
+	"Both values can have + and - prefix, in which case the change\n"
+	"will be relative\n"
+	"\n"
+	"Some exapmles:\n"
+	"\n"
+	"6500\n"
+	"6500 1.0\n"
+	"+100\n"
+	"-100\n"
+	"+0 0.8\n"
+	"+0 -0.02\n"
+	"+0 +0.02\n";
 
 int main(int argc, char *argv[]) {
 	wl_list_init(&outputs);
@@ -467,21 +485,14 @@ int main(int argc, char *argv[]) {
 	setting.gamma[2] = 1.0;
 	setting.brightness = 1.0;
 
-	/* int opt; */
-	/* while ((opt = getojt(argc, argv, "ht:b:")) != -1) { */
-	/* 	switch (opt) { */
-	/* 	case 't': */
-	/* 		setting.temperature = atoi(optarg); */
-	/* 		break; */
-	/* 	case 'b': */
-	/* 		setting.brightness = strtof(optarg, NULL); */
-	/* 		break; */
-	/* 	case 'h': */
-	/* 	default: */
-	/* 		fprintf(stderr, usage); */
-	/* 		return opt == 'h' ? EXIT_SUCCESS : EXIT_FAILURE; */
-	/* 	} */
-	/* } */
+	int opt;
+	while ((opt = getopt(argc, argv, "h")) != -1) {
+		switch (opt) {
+		case 'h':
+			fprintf(stderr, usage);
+			return EXIT_SUCCESS;
+		}
+	}
 
 	struct wl_display *display = wl_display_connect(NULL);
 	if (display == NULL) {
@@ -561,10 +572,6 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "failed to adjust temperature\n");
 		}
 	}
-
-	/* while (wl_display_dispatch(display) != -1) { */
-	/* 	// This space is intentionnally left blank */
-	/* } */
 
 	return EXIT_SUCCESS;
 }
