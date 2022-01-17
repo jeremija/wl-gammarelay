@@ -411,7 +411,8 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size,
 static int adjust_temperature(struct wl_display *display, color_setting_t setting) {
 	struct output *output = NULL;
 
-	printf("%d %f\n", setting.temperature, setting.brightness);
+	fprintf(stdout, "%d %f\n", setting.temperature, setting.brightness);
+	fflush(stdout);
 
 	if (gamma_control_manager == NULL) {
 		fprintf(stderr,
