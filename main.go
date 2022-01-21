@@ -136,6 +136,8 @@ func main2(args Arguments) error {
 		cancel()
 	}
 
+	log.Printf("Starting client\n")
+
 	// Act as a client.
 	colorParams, err := args.ColorParams()
 	if err != nil {
