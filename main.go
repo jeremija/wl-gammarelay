@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -16,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/jeremija/wl-gammarelay/display"
+	"github.com/jeremija/wl-gammarelay/service"
 	"github.com/spf13/pflag"
 )
 
@@ -29,7 +28,7 @@ type Arguments struct {
 	Brightness  string
 }
 
-func (a Arguments) ColorParams() (ColorParams, error) {
+func (a Arguments) ColorParams() (service.ColorParams, error) {
 	tempStr := a.Temperature
 	brightnessStr := a.Brightness
 
@@ -39,15 +38,15 @@ func (a Arguments) ColorParams() (ColorParams, error) {
 
 	temperature, err := strconv.Atoi(tempStr)
 	if err != nil {
-		return ColorParams{}, fmt.Errorf("parsing temperature: %w", err)
+		return service.ColorParams{}, fmt.Errorf("parsing temperature: %w", err)
 	}
 
 	brightness, err := strconv.ParseFloat(brightnessStr, 32)
 	if err != nil {
-		return ColorParams{}, fmt.Errorf("parsing brightness: %w", err)
+		return service.ColorParams{}, fmt.Errorf("parsing brightness: %w", err)
 	}
 
-	return ColorParams{
+	return service.ColorParams{
 		ColorParams: display.ColorParams{
 			Temperature: temperature,
 			Brightness:  float32(brightness),
@@ -55,10 +54,6 @@ func (a Arguments) ColorParams() (ColorParams, error) {
 		TemperatureIsRealtive: isRelative(tempStr),
 		BrightnessIsRelative:  isRelative(brightnessStr),
 	}, nil
-}
-
-type Request struct {
-	ColorParams *ColorParams `json:"colorParams,omitempty"`
 }
 
 func parseArgs(argsSlice []string) (Arguments, error) {
@@ -119,22 +114,17 @@ func main2(args Arguments) error {
 
 	_, err := os.Stat(args.SocketPath)
 	if err != nil && !args.NoStartDaemon {
-		listener, err := net.Listen("unix", args.SocketPath)
-		if err != nil {
-			return fmt.Errorf("failed to listen: %w", err)
+		service := service.New(service.Params{
+			SocketPath: args.SocketPath,
+		})
+
+		if err := service.Listen(); err != nil {
+			return fmt.Errorf("failed to start service: %w", err)
 		}
 
-		go func() {
-			<-ctx.Done()
-			listener.Close()
-		}()
-
-		go func() {
-			if err := startService(args.HistoryPath, listener); err != nil {
-				log.Fatalf("Failed to start service: %s\n", err)
-			}
-		}()
+		go service.Serve(ctx)
 	} else {
+		// So we don't block at the end.
 		cancel()
 	}
 
@@ -150,118 +140,24 @@ func main2(args Arguments) error {
 
 	defer conn.Close()
 
-	log.Printf("sending client request: temperature=%q brightness=%q\n", args.Temperature, args.Brightness)
-
-	err = json.NewEncoder(conn).Encode(Request{
+	err = json.NewEncoder(conn).Encode(service.Request{
 		ColorParams: &colorParams,
 	})
 	if err != nil {
-		return fmt.Errorf("send request: %w", err)
+		return fmt.Errorf("encoding request: %w", err)
 	}
+
+	var res service.Response
+
+	if err := json.NewDecoder(conn).Decode(&res); err != nil {
+		return fmt.Errorf("decoding response: %w", err)
+	}
+
+	fmt.Println(res.Message)
 
 	conn.Close()
 
 	<-ctx.Done()
 
 	return nil
-}
-
-func startService(historyPath string, l net.Listener) error {
-	disp, err := display.New()
-	if err != nil {
-		return fmt.Errorf("cannot connect to display: %w", err)
-	}
-
-	var history io.Writer
-
-	if historyPath != "" {
-		f, err := os.OpenFile(historyPath, os.O_WRONLY|os.O_CREATE, 0)
-		if err != nil {
-			return fmt.Errorf("cannot open history file: %w", err)
-		}
-
-		defer f.Close()
-
-		history = f
-	}
-
-	reqCh := make(chan Request)
-	defer close(reqCh)
-
-	go func() {
-		lastColorParams := display.ColorParams{
-			Temperature: 6500,
-			Brightness:  1.0,
-		}
-
-		for req := range reqCh {
-			switch {
-			case req.ColorParams != nil:
-				colorParams := req.ColorParams.AbsoluteColorParams(lastColorParams)
-				err := disp.SetColor(colorParams)
-				if err != nil {
-					log.Printf("Failed to set color: %s\n", err)
-					continue
-				}
-
-				lastColorParams = colorParams
-
-				if history != nil {
-					_, err := history.Write([]byte(fmt.Sprintf("\r%d %f", lastColorParams.Temperature, lastColorParams.Brightness)))
-					if err != nil {
-						log.Printf("Failed to write history: %v\n", req.ColorParams)
-					}
-				}
-			default:
-				log.Printf("Unexpected request\n")
-			}
-		}
-	}()
-
-	handleConn := func(conn net.Conn) {
-		log.Printf("new conn\n")
-		defer log.Printf("conn closed\n")
-
-		defer conn.Close()
-
-		decoder := json.NewDecoder(conn)
-
-		var req Request
-
-		if err := decoder.Decode(&req); err != nil {
-			log.Printf("Failed to unmarshal JSON: %s\n", err)
-			return
-		}
-
-		reqCh <- req
-	}
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			return fmt.Errorf("failed to accept conn: %w", err)
-		}
-
-		handleConn(conn)
-	}
-}
-
-type ColorParams struct {
-	display.ColorParams
-	TemperatureIsRealtive bool
-	BrightnessIsRelative  bool
-}
-
-func (s *ColorParams) AbsoluteColorParams(prev display.ColorParams) display.ColorParams {
-	p := s.ColorParams
-
-	if s.TemperatureIsRealtive {
-		p.Temperature = prev.Temperature + p.Temperature
-	}
-
-	if s.BrightnessIsRelative {
-		p.Brightness = prev.Brightness + p.Brightness
-	}
-
-	return p
 }
