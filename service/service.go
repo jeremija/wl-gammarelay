@@ -61,7 +61,7 @@ func (s *Service) Listen() error {
 	s.listener = listener
 
 	if s.params.HistoryPath != "" {
-		historyWriter, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE, 0)
+		historyWriter, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE, 0666)
 		if err != nil {
 			return fmt.Errorf("cannot open history file: %w", err)
 		}

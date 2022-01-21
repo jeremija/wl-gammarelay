@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -115,19 +116,27 @@ func main2(args Arguments) error {
 	_, err := os.Stat(args.SocketPath)
 	if err != nil && !args.NoStartDaemon {
 		service := service.New(service.Params{
-			SocketPath: args.SocketPath,
+			SocketPath:  args.SocketPath,
+			HistoryPath: args.HistoryPath,
 		})
 
 		if err := service.Listen(); err != nil {
 			return fmt.Errorf("failed to start service: %w", err)
 		}
 
-		go service.Serve(ctx)
+		log.Printf("Started daemon\n")
+
+		go func() {
+			if err := service.Serve(ctx); err != nil {
+				log.Printf("Failed to serve: %s\n", err)
+			}
+		}()
 	} else {
 		// So we don't block at the end.
 		cancel()
 	}
 
+	// Act as a client.
 	colorParams, err := args.ColorParams()
 	if err != nil {
 		return fmt.Errorf("parsing color params: %w", err)
@@ -157,6 +166,7 @@ func main2(args Arguments) error {
 
 	conn.Close()
 
+	// If we started the server, keep running until the context is canceled.
 	<-ctx.Done()
 
 	return nil
