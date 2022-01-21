@@ -1,4 +1,4 @@
-prefix=/usr/local
+PREFIX ?= /usr/local
 
 .PHONY: all
 all: protocol build
@@ -25,4 +25,4 @@ clean:
 
 .PHONY: install
 install:
-	install bin/wl-gammarelay $(prefix)/bin
+	install bin/wl-gammarelay "$(PREFIX)/bin/wl-gammarelay"
