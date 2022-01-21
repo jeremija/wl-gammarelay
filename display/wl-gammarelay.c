@@ -10,6 +10,8 @@
 #include <wayland-client.h>
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 
+#include "wl-gammarelay.h"
+
 static const float blackbody_color[] = {
 	1.00000000,  0.18172716,  0.00000000, /* 1000K */
 	1.00000000,  0.25503671,  0.00000000, /* 1100K */
@@ -264,12 +266,6 @@ interpolate_color(float a, const float *c1, const float *c2, float *c)
 	c[2] = (1.0-a)*c1[2] + a*c2[2];
 }
 
-/* Color setting */
-typedef struct {
-	int temperature;
-	float gamma[3];
-	float brightness;
-} color_setting_t;
 
 /* Helper macro used in the fill functions */
 #define F(Y, C)  pow((Y) * setting->brightness * \
@@ -408,11 +404,8 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size,
 	colorramp_fill(r, g, b, ramp_size, setting);
 }
 
-static int adjust_temperature(struct wl_display *display, color_setting_t setting) {
+int wl_gammarelay_color_set(struct wl_display *display, color_setting_t setting) {
 	struct output *output = NULL;
-
-	fprintf(stdout, "%d %f\n", setting.temperature, setting.brightness);
-	fflush(stdout);
 
 	if (gamma_control_manager == NULL) {
 		fprintf(stderr,
@@ -451,54 +444,16 @@ static int adjust_temperature(struct wl_display *display, color_setting_t settin
 	return EXIT_SUCCESS;
 }
 
-static const char usage[] = "usage: wl-gammarelay\n"
-	"  -h          show this help message\n"
-	"\n"
-	"This process expects input from stdin in the form of:\n"
-	"\n"
-	"  <temperature> [brightness]"
-	"\n"
-	"Each input must end with a new line character\n"
-	"\n"
-	"Temperature is an integer, brightness is a float from 0 to 1.0.\n"
-	"Both values can have + and - prefix, in which case the change\n"
-	"will be relative\n"
-	"\n"
-	"Some exapmles:\n"
-	"\n"
-	"6500\n"
-	"6500 1.0\n"
-	"+100\n"
-	"-100\n"
-	"+0 0.8\n"
-	"+0 -0.02\n"
-	"+0 +0.02\n";
-
-int main(int argc, char *argv[]) {
+int wl_gammarelay_init(struct wl_display **p_display) {
 	wl_list_init(&outputs);
-
-	color_setting_t setting;
-
-	setting.temperature = 6500;
-	setting.gamma[0] = 1.0;
-	setting.gamma[1] = 1.0;
-	setting.gamma[2] = 1.0;
-	setting.brightness = 1.0;
-
-	int opt;
-	while ((opt = getopt(argc, argv, "h")) != -1) {
-		switch (opt) {
-		case 'h':
-			fprintf(stderr, usage);
-			return EXIT_SUCCESS;
-		}
-	}
 
 	struct wl_display *display = wl_display_connect(NULL);
 	if (display == NULL) {
 		fprintf(stderr, "failed to create display\n");
 		return -1;
 	}
+
+	*p_display = display;
 
 	struct wl_registry *registry = wl_display_get_registry(display);
 	wl_registry_add_listener(registry, &registry_listener, NULL);
@@ -513,66 +468,5 @@ int main(int argc, char *argv[]) {
 	}
 	wl_display_roundtrip(display);
 
-    char *buffer = NULL;
-    size_t len;
-	while (getline(&buffer, &len, stdin) != 1) {
-		char * token = NULL;
-
-		token = strtok(buffer, " ");
-		if (token != NULL) {
-			int relative = 0;
-			int negative = token[0] == '-';
-
-			if (token[0] == '-' || token[0] == '+') {
-				token++;
-				relative = 1;
-			}
-
-			int temperature = atoi(token);
-
-			if (temperature > 0) {
-				if (relative) {
-					if (negative) {
-						setting.temperature -= temperature;
-					} else {
-						setting.temperature += temperature;
-					}
-				} else {
-					setting.temperature = temperature;
-				}
-			}
-		}
-
-		token = strtok(NULL, " ");
-		if (token != NULL) {
-			int relative = 0;
-			int negative = token[0] == '-';
-
-			if (token[0] == '-' || token[0] == '+') {
-				token++;
-				relative = 1;
-			}
-
-			float brightness = strtof(token, NULL);
-
-			if (brightness > 0) {
-				if (relative) {
-					if (negative) {
-						setting.brightness -= brightness;
-					} else {
-						setting.brightness += brightness;
-					}
-				} else {
-					setting.brightness = brightness;
-				}
-			}
-		}
-
-		if (adjust_temperature(display, setting) != 0) {
-			fprintf(stderr, "failed to adjust temperature\n");
-		}
-	}
-
-	return EXIT_SUCCESS;
+	return 0;
 }
-
