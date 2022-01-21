@@ -36,6 +36,12 @@ make
 sudo make install
 ```
 
+To install to `/usr/bin` set the `PREFIX` variable when running `make`:
+
+```
+sudo make install PREFIX=/usr
+```
+
 ## Dependencies
 
 - go 1.17
