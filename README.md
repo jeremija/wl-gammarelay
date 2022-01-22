@@ -17,10 +17,19 @@ temperature and brightess will be set to the desired levels.
 
 The daemon will also write the last color temperature and brightness to a
 history file which can then be tailed to display the value(s) in `waybar` or
-`i3status-rust`.
+`i3status-rust`. The path can be set using the `--history/-H` flag, which should
+be set to an empty string to disable this functionality.
 
 All other invocations act as clients only send requests via unix domain socket.
-The path of the socket can be controlled using the `--sock/-s` flag.
+The path of the socket for both the daemon and the client can be controlled
+using the `--sock/-s` flag.
+
+The `--temperature/-t` flag accepts an integer in the range of `[1000, 10000]`,
+when set to an absolute values. Relative changes can be specified by adding a
+`+` or `-` prefix before the integer.
+
+The `--brigtness/-b` flag behaves similarly to temperature, only its range is
+`[0, 1.0]` and it accepts floats.
 
 Below are some examples on how this utility can be used to change the color
 temperature via keybindings in `swaywm`:
