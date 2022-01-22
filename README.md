@@ -1,4 +1,4 @@
-# wl-gammarelay (alpha)
+# wl-gammarelay
 
 This utility was developed from `gammastep`, a fork of `redshift` as well
 as examples from `wlroots`.
