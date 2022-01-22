@@ -59,14 +59,14 @@ func (s *Service) Listen() error {
 
 	s.listener = listener
 
-	if s.params.HistoryPath != "" {
-		historyWriter, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-		if err != nil {
-			return fmt.Errorf("cannot open history file: %w", err)
-		}
+	// if s.params.HistoryPath != "" {
+	// 	historyWriter, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	// 	if err != nil {
+	// 		return fmt.Errorf("cannot open history file: %w", err)
+	// 	}
 
-		s.historyWriter = historyWriter
-	}
+	// 	s.historyWriter = historyWriter
+	// }
 
 	return nil
 }
@@ -205,19 +205,16 @@ func (s *Service) processRequest(request Request, errCh chan<- error) {
 }
 
 func (s *Service) writeHistory(colorParams display.ColorParams) error {
-	history := s.historyWriter
-
-	if history == nil {
+	if s.params.HistoryPath == "" {
 		return nil
 	}
 
-	if err := history.Truncate(0); err != nil {
-		return fmt.Errorf("Failed to truncate history file: %w", err)
+	history, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		return fmt.Errorf("Failed to open history file: %w", err)
 	}
 
-	if _, err := history.Seek(0, 0); err != nil {
-		return fmt.Errorf("Failed to seek to beginning of history file: %w", err)
-	}
+	defer history.Close()
 
 	msg := fmt.Sprintf("%d %f\n", colorParams.Temperature, colorParams.Brightness)
 

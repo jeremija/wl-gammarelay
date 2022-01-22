@@ -77,8 +77,9 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 	}
 
 	homeDir, _ := os.UserHomeDir()
+	tempDir := os.TempDir()
 
-	defaultHistoryPath := path.Join(homeDir, ".wl-gammarelay.hist")
+	defaultHistoryPath := path.Join(tempDir, ".wl-gammarelay.hist")
 	defaultSocketPath := path.Join(homeDir, ".wl-gammarelay.sock")
 
 	fs.StringVarP(&args.HistoryPath, "history", "H", defaultHistoryPath, "History file to use")
