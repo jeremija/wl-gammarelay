@@ -1,11 +1,12 @@
 PREFIX ?= /usr/local
+BUILD_FLAGS := -ldflags "-X main.GitDescribe=$(shell git describe --always --tags --dirty)" -o peer-calls
 
 .PHONY: all
 all: protocol build
 
 .PHONY: build
 build: bin
-	go build -o bin/wl-gammarelay main.go
+	go build $(BUILD_FLAGS) -o bin/wl-gammarelay main.go
 
 bin:
 	mkdir -p bin/

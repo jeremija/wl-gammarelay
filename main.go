@@ -19,6 +19,8 @@ import (
 	"github.com/spf13/pflag"
 )
 
+var GitDescribe = ""
+
 type Arguments struct {
 	SocketPath  string
 	HistoryPath string
@@ -27,6 +29,8 @@ type Arguments struct {
 
 	Temperature string
 	Brightness  string
+
+	Version bool
 }
 
 func (a Arguments) ColorParams() (service.ColorParams, error) {
@@ -82,6 +86,8 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 
 	fs.BoolVarP(&args.NoStartDaemon, "no-daemon", "D", false, "Do not start daemon if not running")
 
+	fs.BoolVarP(&args.Version, "version", "v", false, "Print version and exit")
+
 	if err := fs.Parse(argsSlice); err != nil {
 		return Arguments{}, fmt.Errorf("parsing args: %w", err)
 	}
@@ -97,6 +103,11 @@ func main() {
 			os.Exit(2)
 		}
 		panic(err)
+	}
+
+	if args.Version {
+		fmt.Println(GitDescribe)
+		return
 	}
 
 	if err := main2(args); err != nil {
