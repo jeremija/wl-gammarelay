@@ -8,11 +8,10 @@ and brightness.
 
 This used to be possible using redshift, when using the `-P -O <temp>` flags,
 but since wayland requires the client to keep running, I developed this tool
-that reads from stdin and dynaimcally updates the temperature and/or
-brightness.
+that spins up a daemon and can be controlled via unix domain socket.
 
 The first invocation to `wl-gammarelay` will spin up a daemon and set the
-desired temperature.
+desired temperature. This can be disabled using the `--no-daemon` flag.
 
 All other invocations will send requests via unix domain socket.
 
@@ -27,7 +26,7 @@ bindsym $mod+Control+Underscore exec wl-gammarelay -b -0.02
 bindsym $mod+Control+Plus       exec wl-gammarelay -b +0.02
 ```
 
-Tested on Arch Linux using swaywm.
+Tested on Arch Linux and Ubuntu 20.04 LTS using `swaywm`.
 
 ## Installation
 
