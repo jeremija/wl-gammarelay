@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -19,7 +18,7 @@ type Service struct {
 	display         *display.Display
 	lastColorParams display.ColorParams
 	listener        net.Listener
-	historyWriter   io.Writer
+	historyWriter   *os.File
 }
 
 type Params struct {
@@ -61,7 +60,7 @@ func (s *Service) Listen() error {
 	s.listener = listener
 
 	if s.params.HistoryPath != "" {
-		historyWriter, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE, 0666)
+		historyWriter, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 		if err != nil {
 			return fmt.Errorf("cannot open history file: %w", err)
 		}
@@ -195,15 +194,36 @@ func (s *Service) processRequest(request Request, errCh chan<- error) {
 
 		s.lastColorParams = colorParams
 
-		if history := s.historyWriter; history != nil {
-			_, err := history.Write([]byte(fmt.Sprintf("\r%d %f", colorParams.Temperature, colorParams.Brightness)))
-			if err != nil {
-				log.Printf("Failed to write history: %s\n", err)
-			}
+		if err := s.writeHistory(colorParams); err != nil {
+			log.Printf("Failed to write history: %s\n", err)
 		}
 	default:
 		log.Printf("Unknown request")
 
 		errCh <- fmt.Errorf("Unknown request")
 	}
+}
+
+func (s *Service) writeHistory(colorParams display.ColorParams) error {
+	history := s.historyWriter
+
+	if history == nil {
+		return nil
+	}
+
+	if err := history.Truncate(0); err != nil {
+		return fmt.Errorf("Failed to truncate history file: %w", err)
+	}
+
+	if _, err := history.Seek(0, 0); err != nil {
+		return fmt.Errorf("Failed to seek to beginning of history file: %w", err)
+	}
+
+	msg := fmt.Sprintf("%d %f\n", colorParams.Temperature, colorParams.Brightness)
+
+	if _, err := history.Write([]byte(msg)); err != nil {
+		return fmt.Errorf("Failed to write history: %w", err)
+	}
+
+	return nil
 }

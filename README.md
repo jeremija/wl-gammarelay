@@ -34,12 +34,22 @@ The `--brigtness/-b` flag behaves similarly to temperature, only its range is
 Below are some examples on how this utility can be used to change the color
 temperature via keybindings in `swaywm`:
 
-```
+```config
 bindsym $mod+Control+Minus      exec wl-gammarelay -t -100
 bindsym $mod+Control+Equal      exec wl-gammarelay -t +100
 bindsym $mod+Control+0          exec killall wl-gammarelay
 bindsym $mod+Control+Underscore exec wl-gammarelay -b -0.02
 bindsym $mod+Control+Plus       exec wl-gammarelay -b +0.02
+```
+
+Sample configuration for `waybar`:
+
+```config
+"modules-right": ["custom/wl-gammarelay"],
+"custom/wl-gammarelay": {
+  "format": "{} ",
+  "exec": "tail -F ~/.wl-gammarelay.hist 2>/dev/null"
+}
 ```
 
 Tested on Arch Linux and Ubuntu 20.04 LTS using `swaywm`.
