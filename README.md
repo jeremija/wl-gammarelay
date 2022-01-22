@@ -3,17 +3,24 @@
 This utility was developed from `gammastep`, a fork of `redshift` as well
 as examples from `wlroots`.
 
-It allows users to use keybindings to dynamically change the color temperature
-and brightness.
+It allows using keybindings to dynamically change the color temperature
+and software brightness.
 
-This used to be possible using redshift, when using the `-P -O <temp>` flags,
-but since wayland requires the client to keep running, I developed this tool
+This used to be possible using redshift using the `-P -O <temp>` flags, but
+since wayland requires the client to keep running, I developed this tool
 that spins up a daemon and can be controlled via unix domain socket.
 
-The first invocation to `wl-gammarelay` will spin up a daemon and set the
-desired temperature. This can be disabled using the `--no-daemon` flag.
+The first invocation to `wl-gammarelay` will spin up a daemon. This can be
+disabled using the `--no-daemon/-D` flag, but if the daemon isn't already running
+in the background the requests will fail. After the daemon starts up, the
+temperature and brightess will be set to the desired levels.
 
-All other invocations will send requests via unix domain socket.
+The daemon will also write the last color temperature and brightness to a
+history file which can then be tailed to display the value(s) in `waybar` or
+`i3status-rust`.
+
+All other invocations act as clients only send requests via unix domain socket.
+The path of the socket can be controlled using the `--sock/-s` flag.
 
 Below are some examples on how this utility can be used to change the color
 temperature via keybindings in `swaywm`:
