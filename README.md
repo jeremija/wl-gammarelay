@@ -45,4 +45,4 @@ sudo make install PREFIX=/usr
 ## Dependencies
 
 - go 1.17
-- wayland
+- wayland (libwayland-dev)
