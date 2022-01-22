@@ -19,7 +19,10 @@ import (
 	"github.com/spf13/pflag"
 )
 
-var GitDescribe = ""
+var (
+	GitDescribe = ""
+	CommitHash  = ""
+)
 
 type Arguments struct {
 	SocketPath  string
@@ -107,6 +110,7 @@ func main() {
 
 	if args.Version {
 		fmt.Println(GitDescribe)
+		fmt.Println(CommitHash)
 		return
 	}
 

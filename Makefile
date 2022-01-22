@@ -1,5 +1,7 @@
 PREFIX ?= /usr/local
-BUILD_FLAGS := -ldflags "-X main.GitDescribe=$(shell git describe --always --tags --dirty)" -o peer-calls
+BUILD_FLAGS := -ldflags "\
+							 -X main.GitDescribe=$(shell git describe --always --tags --dirty) \
+							 -X main.CommitHash=$(shell git rev-parse HEAD)"
 
 .PHONY: all
 all: protocol build
