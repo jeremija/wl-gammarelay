@@ -48,7 +48,7 @@ Sample configuration for `waybar`:
 "modules-right": ["custom/wl-gammarelay"],
 "custom/wl-gammarelay": {
   "format": "{} ",
-  "exec": "tail -F ~/.wl-gammarelay.hist 2>/dev/null"
+  "exec": "tail -F /tmp/.wl-gammarelay.hist 2>/dev/null"
 }
 ```
 
