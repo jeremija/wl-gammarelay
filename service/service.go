@@ -28,6 +28,7 @@ type Service struct {
 type Params struct {
 	SocketPath  string
 	HistoryPath string
+	Verbose     bool
 }
 
 type requestWithResponse struct {
@@ -90,7 +91,10 @@ func (s *Service) Serve(ctx context.Context) error {
 		connsMu.Lock()
 
 		conns[conn] = struct{}{}
-		log.Printf("New connection. Active connections: %d\n", len(conns))
+
+		if s.params.Verbose {
+			log.Printf("New connection. Active connections: %d\n", len(conns))
+		}
 
 		connsMu.Unlock()
 	}
@@ -99,7 +103,10 @@ func (s *Service) Serve(ctx context.Context) error {
 		connsMu.Lock()
 
 		delete(conns, conn)
-		log.Printf("Connection closed. Active connections: %d\n", len(conns))
+
+		if s.params.Verbose {
+			log.Printf("Connection closed. Active connections: %d\n", len(conns))
+		}
 
 		connsMu.Unlock()
 	}
@@ -109,7 +116,10 @@ func (s *Service) Serve(ctx context.Context) error {
 		defer connsMu.Unlock()
 
 		for conn := range conns {
-			log.Print("Terminating connection\n")
+			if s.params.Verbose {
+				log.Print("Terminating connection\n")
+			}
+
 			conn.Close()
 		}
 	}
@@ -155,7 +165,7 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 	}
 
 	for {
-		req, err := read()
+		request, err := read()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// Client closed the connection.
@@ -173,11 +183,16 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 
+		if s.params.Verbose {
+			b, _ := json.Marshal(request)
+			log.Printf("Received request: %s\n", string(b))
+		}
+
 		responseCh := make(chan types.Response, 1)
 
 		select {
 		case s.reqCh <- requestWithResponse{
-			request:    req,
+			request:    request,
 			responseCh: responseCh,
 		}:
 		case <-ctx.Done():
@@ -194,6 +209,11 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 
 		select {
 		case response := <-responseCh:
+			if s.params.Verbose {
+				b, _ := json.Marshal(response)
+				log.Printf("Sending response: %s\n", string(b))
+			}
+
 			write(response)
 		case <-ctx.Done():
 			log.Printf("Received no response in time: %s\n", ctx.Err())
@@ -212,10 +232,6 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 // going to be written to this channel, and it will be closed at the end.
 func (s *Service) handleRequest(request types.Request, responseCh chan<- types.Response) {
 	defer close(responseCh)
-
-	requestJSON, _ := json.Marshal(request)
-
-	log.Printf("Handling request: %s\n", string(requestJSON))
 
 	switch {
 	case request.Color != nil:

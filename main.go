@@ -42,6 +42,19 @@ func (a Arguments) Color() types.Color {
 	}
 }
 
+func getSocketDir() string {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir != "" {
+		return runtimeDir
+	}
+
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		return homeDir
+	}
+
+	return ""
+}
+
 func parseArgs(argsSlice []string) (Arguments, error) {
 	var args Arguments
 
@@ -54,11 +67,10 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 		fs.PrintDefaults()
 	}
 
-	homeDir, _ := os.UserHomeDir()
 	tempDir := os.TempDir()
 
 	defaultHistoryPath := path.Join(tempDir, ".wl-gammarelay.hist")
-	defaultSocketPath := path.Join(homeDir, ".wl-gammarelay.sock")
+	defaultSocketPath := path.Join(getSocketDir(), "wl-gammarelay.sock")
 
 	fs.StringVarP(&args.HistoryPath, "history", "H", defaultHistoryPath, "History file to use")
 	fs.StringVarP(&args.SocketPath, "sock", "s", defaultSocketPath, "Unix domain socket path for RPC")
@@ -113,6 +125,7 @@ func main2(args Arguments) error {
 		service := service.New(service.Params{
 			SocketPath:  args.SocketPath,
 			HistoryPath: args.HistoryPath,
+			Verbose:     args.Verbose,
 		})
 
 		if err := service.Listen(); err != nil {
