@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path"
 	"syscall"
+	"time"
 
 	"github.com/jeremija/wl-gammarelay/display"
 	"github.com/jeremija/wl-gammarelay/service"
@@ -28,7 +29,8 @@ type Arguments struct {
 	SocketPath  string
 	HistoryPath string
 
-	NoStartDaemon bool
+	NoStartDaemon    bool
+	ReconnectTimeout time.Duration
 
 	Temperature string
 	Brightness  string
@@ -80,7 +82,9 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 	fs.StringVarP(&args.Brightness, "brightness", "b", "", "Brightness to set, max is 1.0")
 
 	fs.BoolVarP(&args.NoStartDaemon, "no-daemon", "D", false, "Do not start daemon if not running")
+
 	fs.StringSliceVarP(&args.Subscribe, "subscribe", "S", nil, "Subscribe to certain updates")
+	fs.DurationVarP(&args.ReconnectTimeout, "reconnect-timeout", "T", 5*time.Second, "Time to reconnect on subscribe")
 
 	fs.BoolVarP(&args.Version, "version", "V", false, "Print version and exit")
 	fs.BoolVarP(&args.Verbose, "verbose", "v", false, "Print client socket request and response messages")
@@ -154,69 +158,17 @@ func main2(args Arguments) error {
 
 	switch {
 	case args.Temperature != "" || args.Brightness != "":
-		cl, err := dialClient(args.SocketPath, args.Verbose)
-		if err != nil {
-			return fmt.Errorf("dialling client: %w", err)
+		if err := setTemperature(args); err != nil {
+			return fmt.Errorf("set temperature failed: %w", err)
 		}
-
-		defer cl.Close()
-
-		color := args.Color()
-
-		request := types.Request{
-			Color: &color,
-		}
-
-		if err := cl.Write(request); err != nil {
-			return fmt.Errorf("writing request: %w", err)
-		}
-
-		_, err = cl.Read()
-		if err != nil {
-			return fmt.Errorf("reading response: %w", err)
-		}
-
-		cl.Close()
 
 	case args.Subscribe != nil:
-		cl, err := dialClient(args.SocketPath, args.Verbose)
-		if err != nil {
-			return fmt.Errorf("dialling client: %w", err)
-		}
-
-		defer cl.Close()
-
-		subscribe := make([]types.SubscriptionKey, len(args.Subscribe))
-
-		for i, key := range args.Subscribe {
-			subscribe[i] = types.SubscriptionKey(key)
-		}
-
-		request := types.Request{
-			Subscribe: subscribe,
-		}
-
-		if err := cl.Write(request); err != nil {
-			return fmt.Errorf("writing request: %w", err)
-		}
-
-		go func() {
-			<-ctx.Done()
-
-			cl.Close()
-		}()
-
-		for {
-			response, err := cl.Read()
-			if err != nil {
-				if errors.Is(err, io.EOF) || ctx.Err() != nil {
-					return nil
-				}
-
-				return fmt.Errorf("read subscription response: %w", err)
+		if err := subscribe(ctx, args); err != nil {
+			if errors.Is(err, ctx.Err()) {
+				return nil
 			}
 
-			writeResponse(response)
+			return fmt.Errorf("subscribe failed: %w", err)
 		}
 	}
 
@@ -245,6 +197,101 @@ func newDaemon(socketPath string, historyPath string, verbose bool) (*service.Se
 		HistoryPath: historyPath,
 		Verbose:     verbose,
 	}), nil
+}
+
+func setTemperature(args Arguments) error {
+	cl, err := dialClient(args.SocketPath, args.Verbose)
+	if err != nil {
+		return fmt.Errorf("dialling client: %w", err)
+	}
+
+	defer cl.Close()
+
+	color := args.Color()
+
+	request := types.Request{
+		Color: &color,
+	}
+
+	if err := cl.Write(request); err != nil {
+		return fmt.Errorf("writing request: %w", err)
+	}
+
+	_, err = cl.Read()
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+
+	return nil
+}
+
+func subscribe(ctx context.Context, args Arguments) error {
+	connectAndReadLoop := func() error {
+		cl, err := dialClient(args.SocketPath, args.Verbose)
+		if err != nil {
+			return fmt.Errorf("dialling client: %w", err)
+		}
+
+		defer cl.Close()
+
+		keys := make([]types.SubscriptionKey, len(args.Subscribe))
+
+		for i, key := range args.Subscribe {
+			keys[i] = types.SubscriptionKey(key)
+		}
+
+		request := types.Request{
+			Subscribe: keys,
+		}
+
+		if err := cl.Write(request); err != nil {
+			return fmt.Errorf("writing request: %w", err)
+		}
+
+		go func() {
+			<-ctx.Done()
+
+			cl.Close()
+		}()
+
+		for {
+			response, err := cl.Read()
+			if err != nil {
+				return fmt.Errorf("read error: %w", err)
+			}
+
+			writeResponse(response)
+		}
+	}
+
+	for {
+		// connectAndReadLoop always returns an error when it's done.
+		err := connectAndReadLoop()
+
+		// If the cause was context, we're done.
+		if ctx.Err() != nil {
+			return fmt.Errorf("context done: %w", err)
+		}
+
+		if errors.Is(err, io.EOF) {
+			continue
+		}
+
+		if args.ReconnectTimeout <= 0 {
+			return fmt.Errorf("subscribe failed: %w", err)
+		}
+
+		log.Printf("Dial failed, reconnecting in: %s\n", args.ReconnectTimeout)
+
+		timer := time.NewTimer(args.ReconnectTimeout)
+
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("context done: %w", ctx.Err())
+		}
+	}
 }
 
 type client struct {
