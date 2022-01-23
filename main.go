@@ -10,12 +10,10 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strconv"
-	"strings"
 	"syscall"
 
-	"github.com/jeremija/wl-gammarelay/display"
 	"github.com/jeremija/wl-gammarelay/service"
+	"github.com/jeremija/wl-gammarelay/types"
 	"github.com/spf13/pflag"
 )
 
@@ -34,34 +32,14 @@ type Arguments struct {
 	Brightness  string
 
 	Version bool
+	Verbose bool
 }
 
-func (a Arguments) ColorParams() (service.ColorParams, error) {
-	tempStr := a.Temperature
-	brightnessStr := a.Brightness
-
-	isRelative := func(str string) bool {
-		return strings.HasPrefix(str, "-") || strings.HasPrefix(str, "+")
+func (a Arguments) Color() types.Color {
+	return types.Color{
+		Temperature: a.Temperature,
+		Brightness:  a.Brightness,
 	}
-
-	temperature, err := strconv.Atoi(tempStr)
-	if err != nil {
-		return service.ColorParams{}, fmt.Errorf("parsing temperature: %w", err)
-	}
-
-	brightness, err := strconv.ParseFloat(brightnessStr, 32)
-	if err != nil {
-		return service.ColorParams{}, fmt.Errorf("parsing brightness: %w", err)
-	}
-
-	return service.ColorParams{
-		ColorParams: display.ColorParams{
-			Temperature: temperature,
-			Brightness:  float32(brightness),
-		},
-		TemperatureIsRealtive: isRelative(tempStr),
-		BrightnessIsRelative:  isRelative(brightnessStr),
-	}, nil
 }
 
 func parseArgs(argsSlice []string) (Arguments, error) {
@@ -85,12 +63,13 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 	fs.StringVarP(&args.HistoryPath, "history", "H", defaultHistoryPath, "History file to use")
 	fs.StringVarP(&args.SocketPath, "sock", "s", defaultSocketPath, "Unix domain socket path for RPC")
 
-	fs.StringVarP(&args.Temperature, "temperature", "t", "+0", "Color temperature to set, neutral is 6500.")
-	fs.StringVarP(&args.Brightness, "brightness", "b", "+0", "Brightness to set, max is 1.0")
+	fs.StringVarP(&args.Temperature, "temperature", "t", "", "Color temperature to set, neutral is 6500.")
+	fs.StringVarP(&args.Brightness, "brightness", "b", "", "Brightness to set, max is 1.0")
 
 	fs.BoolVarP(&args.NoStartDaemon, "no-daemon", "D", false, "Do not start daemon if not running")
 
-	fs.BoolVarP(&args.Version, "version", "v", false, "Print version and exit")
+	fs.BoolVarP(&args.Version, "version", "V", false, "Print version and exit")
+	fs.BoolVarP(&args.Verbose, "verbose", "v", false, "Print client socket request and response messages")
 
 	if err := fs.Parse(argsSlice); err != nil {
 		return Arguments{}, fmt.Errorf("parsing args: %w", err)
@@ -144,7 +123,7 @@ func main2(args Arguments) error {
 
 		go func() {
 			if err := service.Serve(ctx); err != nil {
-				log.Printf("Failed to serve: %s\n", err)
+				log.Printf("Serve done: %s\n", err)
 			}
 		}()
 	} else {
@@ -152,13 +131,8 @@ func main2(args Arguments) error {
 		cancel()
 	}
 
-	log.Printf("Starting client\n")
-
 	// Act as a client.
-	colorParams, err := args.ColorParams()
-	if err != nil {
-		return fmt.Errorf("parsing color params: %w", err)
-	}
+	color := args.Color()
 
 	conn, err := net.Dial("unix", args.SocketPath)
 	if err != nil {
@@ -167,20 +141,30 @@ func main2(args Arguments) error {
 
 	defer conn.Close()
 
-	err = json.NewEncoder(conn).Encode(service.Request{
-		ColorParams: &colorParams,
+	request, err := json.Marshal(types.Request{
+		Color: &color,
 	})
 	if err != nil {
 		return fmt.Errorf("encoding request: %w", err)
 	}
 
-	var res service.Response
+	if args.Verbose {
+		fmt.Println(string(request))
+	}
+
+	if err = json.NewEncoder(conn).Encode(json.RawMessage(request)); err != nil {
+		return fmt.Errorf("encoding request: %w", err)
+	}
+
+	var res json.RawMessage
 
 	if err := json.NewDecoder(conn).Decode(&res); err != nil {
 		return fmt.Errorf("decoding response: %w", err)
 	}
 
-	fmt.Println(res.Message)
+	if args.Verbose {
+		fmt.Println(string(res))
+	}
 
 	conn.Close()
 
