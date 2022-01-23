@@ -67,7 +67,7 @@ To install to `/usr/bin` set the `PREFIX` variable when running `make`:
 sudo make install PREFIX=/usr
 ```
 
-## Unix Socket Protocol
+## Unix Domain Socket Protocol
 
 The default path of the unix socket will be set to
 `$XDG_RUNTIME_DIR/wl-gammarelay.sock`.
@@ -81,7 +81,7 @@ that made the request, but this might change in the future. For example, we
 might want to enable sending updates to all other connections so that
 applications that are interested can update the UI.
 
-The [types](`types/`) folder contains all the type definitions used by the
+The [types](types/) folder contains all the type definitions used by the
 protocol.
 
 The clients send a `types.Request` and the server will respones with a
