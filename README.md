@@ -15,11 +15,6 @@ disabled using the `--no-daemon/-D` flag, but if the daemon isn't already runnin
 in the background the requests will fail. After the daemon starts up, the
 temperature and brightess will be set to the desired levels.
 
-The daemon will also write the last color temperature and brightness to a
-history file which can then be tailed to display the value(s) in `waybar` or
-`i3status-rust`. The path can be set using the `--history/-H` flag, which should
-be set to an empty string to disable this functionality.
-
 All other invocations act as clients only send requests via unix domain socket.
 The path of the socket for both the daemon and the client can be controlled
 using the `--sock/-s` flag.

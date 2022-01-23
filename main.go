@@ -75,7 +75,6 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 
 	defaultSocketPath := path.Join(getSocketDir(), "wl-gammarelay.sock")
 
-	fs.StringVarP(&args.HistoryPath, "history", "H", "", "History file to use")
 	fs.StringVarP(&args.SocketPath, "sock", "s", defaultSocketPath, "Unix domain socket path for RPC")
 
 	fs.StringVarP(&args.Temperature, "temperature", "t", "", "Color temperature to set, neutral is 6500.")
@@ -83,8 +82,8 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 
 	fs.BoolVarP(&args.NoStartDaemon, "no-daemon", "D", false, "Do not start daemon if not running")
 
-	fs.StringSliceVarP(&args.Subscribe, "subscribe", "S", nil, "Subscribe to certain updates")
-	fs.DurationVarP(&args.ReconnectTimeout, "reconnect-timeout", "T", 5*time.Second, "Time to reconnect on subscribe")
+	fs.StringSliceVarP(&args.Subscribe, "subscribe", "S", nil, "Subscribe to updates. Currently supported: color")
+	fs.DurationVarP(&args.ReconnectTimeout, "reconnect-timeout", "T", 5*time.Second, "Time to reconnect after subscribe fails. Set to 0 to disable.")
 
 	fs.BoolVarP(&args.Version, "version", "V", false, "Print version and exit")
 	fs.BoolVarP(&args.Verbose, "verbose", "v", false, "Print client socket request and response messages")

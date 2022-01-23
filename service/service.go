@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -269,10 +268,6 @@ func (s *Service) handleRequest(ctx context.Context, rwr requestWithResponse) {
 
 		s.lastColorParams = colorParams
 
-		if err := s.writeHistory(colorParams); err != nil {
-			log.Printf("Failed to write history: %s\n", err)
-		}
-
 		colorResponse := newColor(colorParams)
 
 		responseCh <- types.Response{
@@ -331,27 +326,6 @@ func (s *Service) handleRequest(ctx context.Context, rwr requestWithResponse) {
 			Error: "Unknown request",
 		}
 	}
-}
-
-func (s *Service) writeHistory(colorParams display.ColorParams) error {
-	if s.params.HistoryPath == "" {
-		return nil
-	}
-
-	history, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		return fmt.Errorf("Failed to open history file: %w", err)
-	}
-
-	defer history.Close()
-
-	msg := fmt.Sprintf("%d %f\n", colorParams.Temperature, colorParams.Brightness)
-
-	if _, err := history.Write([]byte(msg)); err != nil {
-		return fmt.Errorf("Failed to write history: %w", err)
-	}
-
-	return nil
 }
 
 func newColor(p display.ColorParams) *types.Color {
