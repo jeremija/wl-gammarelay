@@ -391,6 +391,12 @@ func newDisplayColorParams(color types.Color, prev display.ColorParams) (display
 		} else {
 			ret.Brightness = float32(brightness)
 		}
+
+		if ret.Brightness > 1 {
+			ret.Brightness = 1
+		} else if ret.Brightness < 0 {
+			ret.Brightness = 0
+		}
 	}
 
 	return ret, nil
