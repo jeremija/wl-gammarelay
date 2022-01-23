@@ -67,6 +67,49 @@ To install to `/usr/bin` set the `PREFIX` variable when running `make`:
 sudo make install PREFIX=/usr
 ```
 
+## Unix Socket Protocol
+
+The default path of the unix socket will be set to
+`$XDG_RUNTIME_DIR/wl-gammarelay.sock`.
+
+The daemon expects a JSON message terminated by a newline `\n` character.
+Multiple simultaneous connections to the service are possible, but the daemon
+will handle each request one by one.
+
+The daemon currently only only writes the temperature updates to the connection
+that made the request, but this might change in the future. For example, we
+might want to enable sending updates to all other connections so that
+applications that are interested can update the UI.
+
+The [types](`types/`) folder contains all the type definitions used by the
+protocol.
+
+The clients send a `types.Request` and the server will respones with a
+`types.Response`.
+
+The `-v` flag can be used to enable logging of requests and responses in both
+the daemon and the client.
+
+Some examples:
+
+```console
+$ wl-gammarelay -v -t 4000 -b 0.8
+{"color":{"temperature":"4000","brightness":"0.8"}}
+{"color":{"temperature":"4000","brightness":"0.8"}}
+
+$ wl-gammarelay -v -t 4000
+{"color":{"temperature":"4000"}}
+{"color":{"temperature":"4000","brightness":"0.8"}}
+
+$ wl-gammarelay -v -t +100
+{"color":{"temperature":"+100"}}
+{"color":{"temperature":"4100","brightness":"0.8"}}
+
+$ wl-gammarelay -v -t -100
+{"color":{"temperature":"-100"}}
+{"color":{"temperature":"4000","brightness":"0.8"}}
+```
+
 ## Dependencies
 
 - go 1.17
