@@ -18,8 +18,8 @@ import (
 )
 
 var (
-	GitDescribe = ""
-	CommitHash  = ""
+	Version    = "unknown"
+	CommitHash = ""
 )
 
 type Arguments struct {
@@ -101,8 +101,12 @@ func main() {
 	}
 
 	if args.Version {
-		fmt.Println(GitDescribe)
-		fmt.Println(CommitHash)
+		fmt.Println(Version)
+
+		if CommitHash != "" {
+			fmt.Println(CommitHash)
+		}
+
 		return
 	}
 

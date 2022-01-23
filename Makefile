@@ -1,7 +1,10 @@
 PREFIX ?= /usr/local
+VERSION ?= $(shell git describe --always --tags --dirty)
+COMMIT_HASH ?= $(shell git rev-parse HEAD)
+
 BUILD_FLAGS := -ldflags "\
-							 -X main.GitDescribe=$(shell git describe --always --tags --dirty) \
-							 -X main.CommitHash=$(shell git rev-parse HEAD)"
+							 -X main.Version=$(VERSION) \
+							 -X main.CommitHash=$(COMMIT_HASH)"
 
 .PHONY: all
 all: protocol build
