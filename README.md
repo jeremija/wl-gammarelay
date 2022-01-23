@@ -95,21 +95,32 @@ the daemon and the client.
 Some examples:
 
 ```console
-$ wl-gammarelay -v -t 4000 -b 0.8
+$ wl-gammarelay
+Daemon started
+
+$ wl-gammarelay --no-daemon -v -t 4000 -b 0.8
 {"color":{"temperature":"4000","brightness":"0.8"}}
 {"color":{"temperature":"4000","brightness":"0.8"}}
 
-$ wl-gammarelay -v -t 4000
+$ wl-gammarelay --no-daemon -v -t 4000
 {"color":{"temperature":"4000"}}
 {"color":{"temperature":"4000","brightness":"0.8"}}
 
-$ wl-gammarelay -v -t +100
+$ wl-gammarelay --no-daemon -v -t +100
 {"color":{"temperature":"+100"}}
 {"color":{"temperature":"4100","brightness":"0.8"}}
 
-$ wl-gammarelay -v -t -100
+$ wl-gammarelay --no-daemon -v -t -100
 {"color":{"temperature":"-100"}}
 {"color":{"temperature":"4000","brightness":"0.8"}}
+
+$ wl-gammarelay --no-daemon --subscribe color
+{"updates":[{"key":"color","color":{"temperature":"4500","brightness":"1.00"}}],"subscribed":["color"]}
+{"updates":[{"key":"color","color":{"temperature":"4400","brightness":"1.00"}}]}
+{"updates":[{"key":"color","color":{"temperature":"4300","brightness":"1.00"}}]}
+{"updates":[{"key":"color","color":{"temperature":"4200","brightness":"1.00"}}]}
+{"updates":[{"key":"color","color":{"temperature":"4100","brightness":"1.00"}}]}
+{"updates":[{"key":"color","color":{"temperature":"4000","brightness":"1.00"}}]}
 ```
 
 ## Dependencies
