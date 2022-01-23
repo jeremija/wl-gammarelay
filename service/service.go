@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,18 +19,23 @@ import (
 type Service struct {
 	params          Params
 	reqCh           chan requestWithResponse
-	display         *display.Display
 	lastColorParams display.ColorParams
-	listener        net.Listener
+	updatesCh       chan []types.Update
+}
+
+type Display interface {
+	SetColor(display.ColorParams) error
 }
 
 type Params struct {
-	SocketPath  string
+	Listener    net.Listener
+	Display     Display
 	HistoryPath string
 	Verbose     bool
 }
 
 type requestWithResponse struct {
+	conn       *connection
 	request    types.Request
 	responseCh chan<- types.Response
 }
@@ -40,7 +44,8 @@ func New(params Params) *Service {
 	return &Service{
 		params: params,
 
-		reqCh: make(chan requestWithResponse),
+		reqCh:     make(chan requestWithResponse),
+		updatesCh: make(chan []types.Update),
 
 		lastColorParams: display.ColorParams{
 			Temperature: 6500,
@@ -49,45 +54,66 @@ func New(params Params) *Service {
 	}
 }
 
-func (s *Service) Listen() error {
-	display, err := display.New()
-	if err != nil {
-		return fmt.Errorf("failed to create display: %w", err)
-	}
-
-	s.display = display
-
-	listener, err := net.Listen("unix", s.params.SocketPath)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
-	}
-
-	s.listener = listener
-
-	return nil
+func (s *Service) Close() error {
+	return s.params.Listener.Close()
 }
 
 func (s *Service) Serve(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
-		s.listener.Close()
+		s.params.Listener.Close()
 	}()
 
 	go func() {
 		for {
 			select {
 			case rwr := <-s.reqCh:
-				s.handleRequest(rwr.request, rwr.responseCh)
+				s.handleRequest(ctx, rwr)
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	conns := map[net.Conn]struct{}{}
+	conns := map[*connection]struct{}{}
 	connsMu := sync.Mutex{}
 
-	addConn := func(conn net.Conn) {
+	go func() {
+		for {
+			select {
+			case updates := <-s.updatesCh:
+				connsMu.Lock()
+
+				allConns := make([]*connection, 0, len(conns))
+
+				for conn := range conns {
+					allConns = append(allConns, conn)
+				}
+
+				connsMu.Unlock()
+
+				for _, conn := range allConns {
+					updatesforConn := make([]types.Update, 0, len(updates))
+					for _, update := range updates {
+
+						if conn.IsSubscribed(update.Key) {
+							updatesforConn = append(updatesforConn, update)
+						}
+					}
+
+					if len(updatesforConn) > 0 {
+						conn.WriteLogError(types.Response{
+							Updates: updatesforConn,
+						})
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	addConn := func(conn *connection) {
 		connsMu.Lock()
 
 		conns[conn] = struct{}{}
@@ -99,7 +125,7 @@ func (s *Service) Serve(ctx context.Context) error {
 		connsMu.Unlock()
 	}
 
-	removeConn := func(conn net.Conn) {
+	removeConn := func(conn *connection) {
 		connsMu.Lock()
 
 		delete(conns, conn)
@@ -125,47 +151,29 @@ func (s *Service) Serve(ctx context.Context) error {
 	}
 
 	for {
-		conn, err := s.listener.Accept()
+		netConn, err := s.params.Listener.Accept()
 		if err != nil {
 			closeAllConns()
 
 			return fmt.Errorf("failed to accept conn: %w", err)
 		}
 
+		conn := newConnection(netConn)
+
 		addConn(conn)
 
-		go func(conn net.Conn) {
+		go func(conn *connection) {
 			defer removeConn(conn)
 			s.handleConn(ctx, conn)
 		}(conn)
 	}
 }
 
-func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
+func (s *Service) handleConn(ctx context.Context, conn *connection) {
 	defer conn.Close()
 
-	decoder := json.NewDecoder(conn)
-	encoder := json.NewEncoder(conn)
-
-	read := func() (types.Request, error) {
-		var request types.Request
-
-		err := decoder.Decode(&request)
-
-		return request, err
-	}
-
-	write := func(response types.Response) bool {
-		if err := encoder.Encode(response); err != nil {
-			log.Printf("Failed to write response: %s\n", err)
-			return false
-		}
-
-		return true
-	}
-
 	for {
-		request, err := read()
+		request, err := conn.Read()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// Client closed the connection.
@@ -174,11 +182,9 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 
 			log.Printf("Failed to decode message: %s\n", err)
 
-			if !write(types.Response{
+			conn.WriteLogError(types.Response{
 				Error: "Failed to decode message",
-			}) {
-				return
-			}
+			})
 
 			return
 		}
@@ -194,15 +200,14 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 		case s.reqCh <- requestWithResponse{
 			request:    request,
 			responseCh: responseCh,
+			conn:       conn,
 		}:
 		case <-ctx.Done():
 			log.Printf("Failed to enqueue request: %s\n", ctx.Err())
 
-			if !write(types.Response{
+			conn.WriteLogError(types.Response{
 				Error: "Failed to enqueue request",
-			}) {
-				return
-			}
+			})
 
 			return
 		}
@@ -214,11 +219,11 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 				log.Printf("Sending response: %s\n", string(b))
 			}
 
-			write(response)
+			conn.WriteLogError(response)
 		case <-ctx.Done():
 			log.Printf("Received no response in time: %s\n", ctx.Err())
 
-			write(types.Response{
+			conn.WriteLogError(types.Response{
 				Error: "Received no response in time",
 			})
 
@@ -230,8 +235,12 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 // handleRequest will process the request and write to the responseCh. To
 // avoid deadlocks, the responseCh must be 1-buffered. Only one message is ever
 // going to be written to this channel, and it will be closed at the end.
-func (s *Service) handleRequest(request types.Request, responseCh chan<- types.Response) {
-	defer close(responseCh)
+func (s *Service) handleRequest(ctx context.Context, rwr requestWithResponse) {
+	request := rwr.request
+	responseCh := rwr.responseCh
+	conn := rwr.conn
+
+	defer close(rwr.responseCh)
 
 	switch {
 	case request.Color != nil:
@@ -246,7 +255,7 @@ func (s *Service) handleRequest(request types.Request, responseCh chan<- types.R
 			return
 		}
 
-		err = s.display.SetColor(colorParams)
+		err = s.params.Display.SetColor(colorParams)
 		if err != nil {
 			log.Printf("Failed to set color: %s\n", err)
 
@@ -259,16 +268,57 @@ func (s *Service) handleRequest(request types.Request, responseCh chan<- types.R
 
 		s.lastColorParams = colorParams
 
-		if err := s.writeHistory(colorParams); err != nil {
-			log.Printf("Failed to write history: %s\n", err)
-		}
+		colorResponse := newColor(colorParams)
 
 		responseCh <- types.Response{
-			Color: &types.Color{
-				Temperature: strconv.Itoa(colorParams.Temperature),
-				Brightness:  strconv.FormatFloat(float64(colorParams.Brightness), 'f', -1, 32),
+			Color: colorResponse,
+		}
+
+		updates := []types.Update{
+			{
+				Key:   types.SubscriptionKeyColor,
+				Color: colorResponse,
 			},
 		}
+
+		// TODO this is blocking so it might slow down the event loop.
+		select {
+		case s.updatesCh <- updates:
+		case <-ctx.Done():
+			log.Printf("Failed to broadcast update: %s\n", ctx.Err())
+			return
+		}
+	case request.Subscribe != nil:
+		conn.Subscribe(request.Subscribe)
+
+		updates := make([]types.Update, 0, 1)
+
+		// Ensure the current status is sent as a response.
+		for _, key := range request.Subscribe {
+			switch key {
+			case types.SubscriptionKeyColor:
+				updates = append(updates, types.Update{
+					Key:   key,
+					Color: newColor(s.lastColorParams),
+				})
+			default:
+			}
+		}
+
+		res := types.Response{
+			Subscribed: request.Subscribe,
+			Updates:    updates,
+		}
+
+		responseCh <- res
+
+	case request.Unsubscribe != nil:
+		conn.Unsubscribe(request.Unsubscribe)
+
+		responseCh <- types.Response{
+			Unsubscribed: request.Unsubscribe,
+		}
+
 	default:
 		log.Printf("Unknown request")
 
@@ -278,25 +328,11 @@ func (s *Service) handleRequest(request types.Request, responseCh chan<- types.R
 	}
 }
 
-func (s *Service) writeHistory(colorParams display.ColorParams) error {
-	if s.params.HistoryPath == "" {
-		return nil
+func newColor(p display.ColorParams) *types.Color {
+	return &types.Color{
+		Temperature: strconv.Itoa(p.Temperature),
+		Brightness:  strconv.FormatFloat(float64(p.Brightness), 'f', 2, 32),
 	}
-
-	history, err := os.OpenFile(s.params.HistoryPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		return fmt.Errorf("Failed to open history file: %w", err)
-	}
-
-	defer history.Close()
-
-	msg := fmt.Sprintf("%d %f\n", colorParams.Temperature, colorParams.Brightness)
-
-	if _, err := history.Write([]byte(msg)); err != nil {
-		return fmt.Errorf("Failed to write history: %w", err)
-	}
-
-	return nil
 }
 
 func newDisplayColorParams(color types.Color, prev display.ColorParams) (display.ColorParams, error) {
@@ -332,6 +368,12 @@ func newDisplayColorParams(color types.Color, prev display.ColorParams) (display
 			ret.Brightness += float32(brightness)
 		} else {
 			ret.Brightness = float32(brightness)
+		}
+
+		if ret.Brightness > 1 {
+			ret.Brightness = 1
+		} else if ret.Brightness < 0 {
+			ret.Brightness = 0
 		}
 	}
 

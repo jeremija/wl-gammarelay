@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"path"
 	"syscall"
+	"time"
 
+	"github.com/jeremija/wl-gammarelay/display"
 	"github.com/jeremija/wl-gammarelay/service"
 	"github.com/jeremija/wl-gammarelay/types"
 	"github.com/spf13/pflag"
@@ -26,10 +29,13 @@ type Arguments struct {
 	SocketPath  string
 	HistoryPath string
 
-	NoStartDaemon bool
+	NoStartDaemon    bool
+	ReconnectTimeout time.Duration
 
 	Temperature string
 	Brightness  string
+
+	Subscribe []string
 
 	Version bool
 	Verbose bool
@@ -67,18 +73,17 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 		fs.PrintDefaults()
 	}
 
-	tempDir := os.TempDir()
-
-	defaultHistoryPath := path.Join(tempDir, ".wl-gammarelay.hist")
 	defaultSocketPath := path.Join(getSocketDir(), "wl-gammarelay.sock")
 
-	fs.StringVarP(&args.HistoryPath, "history", "H", defaultHistoryPath, "History file to use")
 	fs.StringVarP(&args.SocketPath, "sock", "s", defaultSocketPath, "Unix domain socket path for RPC")
 
 	fs.StringVarP(&args.Temperature, "temperature", "t", "", "Color temperature to set, neutral is 6500.")
 	fs.StringVarP(&args.Brightness, "brightness", "b", "", "Brightness to set, max is 1.0")
 
 	fs.BoolVarP(&args.NoStartDaemon, "no-daemon", "D", false, "Do not start daemon if not running")
+
+	fs.StringSliceVarP(&args.Subscribe, "subscribe", "S", nil, "Subscribe to updates. Currently supported: color")
+	fs.DurationVarP(&args.ReconnectTimeout, "reconnect-timeout", "T", 5*time.Second, "Time to reconnect after subscribe fails. Set to 0 to disable.")
 
 	fs.BoolVarP(&args.Version, "version", "V", false, "Print version and exit")
 	fs.BoolVarP(&args.Verbose, "verbose", "v", false, "Print client socket request and response messages")
@@ -88,6 +93,14 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 	}
 
 	return args, nil
+}
+
+func writeRequest(request types.Request) {
+	json.NewEncoder(os.Stdout).Encode(request)
+}
+
+func writeResponse(response types.Response) {
+	json.NewEncoder(os.Stdout).Encode(response)
 }
 
 // main is a test function for proof-of-concept.
@@ -100,6 +113,12 @@ func main() {
 		panic(err)
 	}
 
+	if err := main2(args); err != nil {
+		panic(err)
+	}
+}
+
+func main2(args Arguments) error {
 	if args.Version {
 		fmt.Println(Version)
 
@@ -107,86 +126,234 @@ func main() {
 			fmt.Println(CommitHash)
 		}
 
-		return
+		return nil
 	}
 
-	if err := main2(args); err != nil {
-		panic(err)
-	}
-}
-
-func main2(args Arguments) error {
 	ctx := context.Background()
 
 	// We need to handle these events so that the listener removes the socket
 	// file gracefully, otherwise the daemon might not start successfully next
 	// time.
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGPIPE)
 	defer cancel()
+
+	var startedDaemon bool
 
 	_, err := os.Stat(args.SocketPath)
 	if err != nil && !args.NoStartDaemon {
-		service := service.New(service.Params{
-			SocketPath:  args.SocketPath,
-			HistoryPath: args.HistoryPath,
-			Verbose:     args.Verbose,
-		})
-
-		if err := service.Listen(); err != nil {
+		service, err := newDaemon(args.SocketPath, args.HistoryPath, args.Verbose)
+		if err != nil {
 			return fmt.Errorf("failed to start service: %w", err)
 		}
 
+		defer service.Close()
+
 		log.Printf("Started daemon\n")
 
-		go func() {
-			if err := service.Serve(ctx); err != nil {
-				log.Printf("Serve done: %s\n", err)
+		go service.Serve(ctx)
+
+		startedDaemon = true
+	}
+
+	switch {
+	case args.Temperature != "" || args.Brightness != "":
+		if err := setTemperature(args); err != nil {
+			return fmt.Errorf("set temperature failed: %w", err)
+		}
+
+	case args.Subscribe != nil:
+		if err := subscribe(ctx, args); err != nil {
+			if errors.Is(err, ctx.Err()) {
+				return nil
 			}
-		}()
-	} else {
-		// So we don't block at the end.
-		cancel()
+
+			return fmt.Errorf("subscribe failed: %w", err)
+		}
 	}
 
-	// Act as a client.
-	color := args.Color()
-
-	conn, err := net.Dial("unix", args.SocketPath)
-	if err != nil {
-		return fmt.Errorf("dial unix socket: %w", err)
+	// If we started the server, keep running until the context is canceled, otherwise bail.
+	if startedDaemon {
+		<-ctx.Done()
 	}
-
-	defer conn.Close()
-
-	request, err := json.Marshal(types.Request{
-		Color: &color,
-	})
-	if err != nil {
-		return fmt.Errorf("encoding request: %w", err)
-	}
-
-	if args.Verbose {
-		fmt.Println(string(request))
-	}
-
-	if err = json.NewEncoder(conn).Encode(json.RawMessage(request)); err != nil {
-		return fmt.Errorf("encoding request: %w", err)
-	}
-
-	var res json.RawMessage
-
-	if err := json.NewDecoder(conn).Decode(&res); err != nil {
-		return fmt.Errorf("decoding response: %w", err)
-	}
-
-	if args.Verbose {
-		fmt.Println(string(res))
-	}
-
-	conn.Close()
-
-	// If we started the server, keep running until the context is canceled.
-	<-ctx.Done()
 
 	return nil
+}
+
+func newDaemon(socketPath string, historyPath string, verbose bool) (*service.Service, error) {
+	display, err := display.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create display: %w", err)
+	}
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen: %w", err)
+	}
+
+	return service.New(service.Params{
+		Listener:    listener,
+		Display:     display,
+		HistoryPath: historyPath,
+		Verbose:     verbose,
+	}), nil
+}
+
+func setTemperature(args Arguments) error {
+	cl, err := dialClient(args.SocketPath, args.Verbose)
+	if err != nil {
+		return fmt.Errorf("dialling client: %w", err)
+	}
+
+	defer cl.Close()
+
+	color := args.Color()
+
+	request := types.Request{
+		Color: &color,
+	}
+
+	if err := cl.Write(request); err != nil {
+		return fmt.Errorf("writing request: %w", err)
+	}
+
+	_, err = cl.Read()
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+
+	return nil
+}
+
+func subscribe(ctx context.Context, args Arguments) error {
+	connectAndReadLoop := func() error {
+		cl, err := dialClient(args.SocketPath, args.Verbose)
+		if err != nil {
+			return fmt.Errorf("dialling client: %w", err)
+		}
+
+		defer cl.Close()
+
+		keys := make([]types.SubscriptionKey, len(args.Subscribe))
+
+		for i, key := range args.Subscribe {
+			keys[i] = types.SubscriptionKey(key)
+		}
+
+		request := types.Request{
+			Subscribe: keys,
+		}
+
+		if err := cl.Write(request); err != nil {
+			return fmt.Errorf("writing request: %w", err)
+		}
+
+		doneCh := make(chan struct{})
+		defer close(doneCh)
+
+		go func() {
+			select {
+			case <-ctx.Done():
+				cl.Close()
+			case <-doneCh:
+				// So we don't leave dangling goroutines on reconnect
+			}
+		}()
+
+		for {
+			response, err := cl.Read()
+			if err != nil {
+				return fmt.Errorf("read error: %w", err)
+			}
+
+			writeResponse(response)
+		}
+	}
+
+	for {
+		// connectAndReadLoop always returns an error when it's done.
+		err := connectAndReadLoop()
+
+		// If the cause was context, we're done.
+		if ctx.Err() != nil {
+			return fmt.Errorf("context done: %w", err)
+		}
+
+		if errors.Is(err, io.EOF) {
+			continue
+		}
+
+		if args.ReconnectTimeout <= 0 {
+			return fmt.Errorf("subscribe failed: %w", err)
+		}
+
+		log.Printf("Dial failed, reconnecting in: %s\n", args.ReconnectTimeout)
+
+		timer := time.NewTimer(args.ReconnectTimeout)
+
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("context done: %w", ctx.Err())
+		}
+	}
+}
+
+type client struct {
+	conn net.Conn
+
+	decoder *json.Decoder
+	encoder *json.Encoder
+
+	verbose bool
+}
+
+func dialClient(socketPath string, verbose bool) (*client, error) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("dial unix socket: %w", err)
+	}
+
+	return &client{
+		conn: conn,
+
+		encoder: json.NewEncoder(conn),
+		decoder: json.NewDecoder(conn),
+
+		verbose: verbose,
+	}, nil
+}
+
+func (c *client) Close() error {
+	if err := c.conn.Close(); err != nil {
+		return fmt.Errorf("failed to close: %w", err)
+	}
+
+	return nil
+}
+
+func (c *client) Write(request types.Request) error {
+	if c.verbose {
+		writeRequest(request)
+	}
+
+	if err := c.encoder.Encode(request); err != nil {
+		return fmt.Errorf("failed to encode request: %w", err)
+	}
+
+	return nil
+}
+
+func (c *client) Read() (types.Response, error) {
+	var response types.Response
+
+	if err := c.decoder.Decode(&response); err != nil {
+		return types.Response{}, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if c.verbose {
+		writeResponse(response)
+	}
+
+	return response, nil
 }
