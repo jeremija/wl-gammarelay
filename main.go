@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"path"
 	"syscall"
 
+	"github.com/jeremija/wl-gammarelay/display"
 	"github.com/jeremija/wl-gammarelay/service"
 	"github.com/jeremija/wl-gammarelay/types"
 	"github.com/spf13/pflag"
@@ -30,6 +32,8 @@ type Arguments struct {
 
 	Temperature string
 	Brightness  string
+
+	Subscribe []string
 
 	Version bool
 	Verbose bool
@@ -79,6 +83,7 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 	fs.StringVarP(&args.Brightness, "brightness", "b", "", "Brightness to set, max is 1.0")
 
 	fs.BoolVarP(&args.NoStartDaemon, "no-daemon", "D", false, "Do not start daemon if not running")
+	fs.StringSliceVarP(&args.Subscribe, "subscribe", "S", nil, "Subscribe to certain updates")
 
 	fs.BoolVarP(&args.Version, "version", "V", false, "Print version and exit")
 	fs.BoolVarP(&args.Verbose, "verbose", "v", false, "Print client socket request and response messages")
@@ -88,6 +93,14 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 	}
 
 	return args, nil
+}
+
+func writeRequest(request types.Request) {
+	json.NewEncoder(os.Stdout).Encode(request)
+}
+
+func writeResponse(response types.Response) {
+	json.NewEncoder(os.Stdout).Encode(response)
 }
 
 // main is a test function for proof-of-concept.
@@ -100,6 +113,12 @@ func main() {
 		panic(err)
 	}
 
+	if err := main2(args); err != nil {
+		panic(err)
+	}
+}
+
+func main2(args Arguments) error {
 	if args.Version {
 		fmt.Println(Version)
 
@@ -107,15 +126,9 @@ func main() {
 			fmt.Println(CommitHash)
 		}
 
-		return
+		return nil
 	}
 
-	if err := main2(args); err != nil {
-		panic(err)
-	}
-}
-
-func main2(args Arguments) error {
 	ctx := context.Background()
 
 	// We need to handle these events so that the listener removes the socket
@@ -124,69 +137,174 @@ func main2(args Arguments) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	var startedDaemon bool
+
 	_, err := os.Stat(args.SocketPath)
 	if err != nil && !args.NoStartDaemon {
-		service := service.New(service.Params{
-			SocketPath:  args.SocketPath,
-			HistoryPath: args.HistoryPath,
-			Verbose:     args.Verbose,
-		})
-
-		if err := service.Listen(); err != nil {
+		service, err := newDaemon(args.SocketPath, args.HistoryPath, args.Verbose)
+		if err != nil {
 			return fmt.Errorf("failed to start service: %w", err)
 		}
 
+		defer service.Close()
+
 		log.Printf("Started daemon\n")
 
+		go service.Serve(ctx)
+
+		startedDaemon = true
+	}
+
+	switch {
+	case args.Temperature != "" || args.Brightness != "":
+		cl, err := dialClient(args.SocketPath, args.Verbose)
+		if err != nil {
+			return fmt.Errorf("dialling client: %w", err)
+		}
+
+		defer cl.Close()
+
+		color := args.Color()
+
+		request := types.Request{
+			Color: &color,
+		}
+
+		if err := cl.Write(request); err != nil {
+			return fmt.Errorf("writing request: %w", err)
+		}
+
+		_, err = cl.Read()
+		if err != nil {
+			return fmt.Errorf("reading response: %w", err)
+		}
+
+		cl.Close()
+
+	case args.Subscribe != nil:
+		cl, err := dialClient(args.SocketPath, args.Verbose)
+		if err != nil {
+			return fmt.Errorf("dialling client: %w", err)
+		}
+
+		defer cl.Close()
+
+		subscribe := make([]types.SubscriptionKey, len(args.Subscribe))
+
+		for i, key := range args.Subscribe {
+			subscribe[i] = types.SubscriptionKey(key)
+		}
+
+		request := types.Request{
+			Subscribe: subscribe,
+		}
+
+		if err := cl.Write(request); err != nil {
+			return fmt.Errorf("writing request: %w", err)
+		}
+
 		go func() {
-			if err := service.Serve(ctx); err != nil {
-				log.Printf("Serve done: %s\n", err)
-			}
+			<-ctx.Done()
+
+			cl.Close()
 		}()
-	} else {
-		// So we don't block at the end.
-		cancel()
+
+		for {
+			response, err := cl.Read()
+			if err != nil {
+				if errors.Is(err, io.EOF) || ctx.Err() != nil {
+					return nil
+				}
+
+				return fmt.Errorf("read subscription response: %w", err)
+			}
+
+			writeResponse(response)
+		}
 	}
 
-	// Act as a client.
-	color := args.Color()
-
-	conn, err := net.Dial("unix", args.SocketPath)
-	if err != nil {
-		return fmt.Errorf("dial unix socket: %w", err)
+	// If we started the server, keep running until the context is canceled, otherwise bail.
+	if startedDaemon {
+		<-ctx.Done()
 	}
-
-	defer conn.Close()
-
-	request, err := json.Marshal(types.Request{
-		Color: &color,
-	})
-	if err != nil {
-		return fmt.Errorf("encoding request: %w", err)
-	}
-
-	if args.Verbose {
-		fmt.Println(string(request))
-	}
-
-	if err = json.NewEncoder(conn).Encode(json.RawMessage(request)); err != nil {
-		return fmt.Errorf("encoding request: %w", err)
-	}
-
-	var res json.RawMessage
-
-	if err := json.NewDecoder(conn).Decode(&res); err != nil {
-		return fmt.Errorf("decoding response: %w", err)
-	}
-
-	if args.Verbose {
-		fmt.Println(string(res))
-	}
-
-	conn.Close()
-
-	// If we started the server, keep running until the context is canceled.
-	<-ctx.Done()
 
 	return nil
+}
+
+func newDaemon(socketPath string, historyPath string, verbose bool) (*service.Service, error) {
+	display, err := display.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create display: %w", err)
+	}
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen: %w", err)
+	}
+
+	return service.New(service.Params{
+		Listener:    listener,
+		Display:     display,
+		HistoryPath: historyPath,
+		Verbose:     verbose,
+	}), nil
+}
+
+type client struct {
+	conn net.Conn
+
+	decoder *json.Decoder
+	encoder *json.Encoder
+
+	verbose bool
+}
+
+func dialClient(socketPath string, verbose bool) (*client, error) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("dial unix socket: %w", err)
+	}
+
+	return &client{
+		conn: conn,
+
+		encoder: json.NewEncoder(conn),
+		decoder: json.NewDecoder(conn),
+
+		verbose: verbose,
+	}, nil
+}
+
+func (c *client) Close() error {
+	if err := c.conn.Close(); err != nil {
+		return fmt.Errorf("failed to close: %w", err)
+	}
+
+	return nil
+}
+
+func (c *client) Write(request types.Request) error {
+	if c.verbose {
+		writeRequest(request)
+	}
+
+	if err := c.encoder.Encode(request); err != nil {
+		return fmt.Errorf("failed to encode request: %w", err)
+	}
+
+	return nil
+}
+
+func (c *client) Read() (types.Response, error) {
+	var response types.Response
+
+	if err := c.decoder.Decode(&response); err != nil {
+		return types.Response{}, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if c.verbose {
+		writeResponse(response)
+	}
+
+	return response, nil
 }
