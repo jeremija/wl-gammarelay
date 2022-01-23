@@ -31,6 +31,9 @@ when set to an absolute values. Relative changes can be specified by adding a
 The `--brigtness/-b` flag behaves similarly to temperature, only its range is
 `[0, 1.0]` and it accepts floats.
 
+The `--subscribe/-S` flag can be used to subscribe to certain changes.
+Currently only `color` is supported.
+
 Below are some examples on how this utility can be used to change the color
 temperature via keybindings in `swaywm`:
 
@@ -47,8 +50,8 @@ Sample configuration for `waybar`:
 ```config
 "modules-right": ["custom/wl-gammarelay"],
 "custom/wl-gammarelay": {
-  "format": "{} ",
-  "exec": "tail -F /tmp/.wl-gammarelay.hist 2>/dev/null"
+    "format": "{} ",
+    "exec": "wl-gammarelay --subscribe color | jq --unbuffered --compact-output -r -c '.updates[] | select(.key == \"color\") | .color | .temperature + \" \" + .brightness'"
 }
 ```
 

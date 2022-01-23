@@ -71,12 +71,9 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 		fs.PrintDefaults()
 	}
 
-	tempDir := os.TempDir()
-
-	defaultHistoryPath := path.Join(tempDir, ".wl-gammarelay.hist")
 	defaultSocketPath := path.Join(getSocketDir(), "wl-gammarelay.sock")
 
-	fs.StringVarP(&args.HistoryPath, "history", "H", defaultHistoryPath, "History file to use")
+	fs.StringVarP(&args.HistoryPath, "history", "H", "", "History file to use")
 	fs.StringVarP(&args.SocketPath, "sock", "s", defaultSocketPath, "Unix domain socket path for RPC")
 
 	fs.StringVarP(&args.Temperature, "temperature", "t", "", "Color temperature to set, neutral is 6500.")
@@ -134,7 +131,7 @@ func main2(args Arguments) error {
 	// We need to handle these events so that the listener removes the socket
 	// file gracefully, otherwise the daemon might not start successfully next
 	// time.
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGPIPE)
 	defer cancel()
 
 	var startedDaemon bool
