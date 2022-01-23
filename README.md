@@ -67,6 +67,10 @@ To install to `/usr/bin` set the `PREFIX` variable when running `make`:
 sudo make install PREFIX=/usr
 ```
 
+### Arch Linux
+
+This package is also on AUR: https://aur.archlinux.org/packages/wl-gammarelay/
+
 ## Unix Domain Socket Protocol
 
 The default path of the unix socket will be set to
