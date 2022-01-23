@@ -353,7 +353,7 @@ func (s *Service) writeHistory(colorParams display.ColorParams) error {
 func newColor(p display.ColorParams) *types.Color {
 	return &types.Color{
 		Temperature: strconv.Itoa(p.Temperature),
-		Brightness:  strconv.FormatFloat(float64(p.Brightness), 'f', -1, 32),
+		Brightness:  strconv.FormatFloat(float64(p.Brightness), 'f', 2, 32),
 	}
 }
 
