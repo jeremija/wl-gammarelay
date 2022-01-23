@@ -24,9 +24,13 @@ type Service struct {
 	updatesCh       chan []types.Update
 }
 
+type Display interface {
+	SetColor(display.ColorParams) error
+}
+
 type Params struct {
 	Listener    net.Listener
-	Display     *display.Display
+	Display     Display
 	HistoryPath string
 	Verbose     bool
 }

@@ -248,10 +248,16 @@ func subscribe(ctx context.Context, args Arguments) error {
 			return fmt.Errorf("writing request: %w", err)
 		}
 
-		go func() {
-			<-ctx.Done()
+		doneCh := make(chan struct{})
+		defer close(doneCh)
 
-			cl.Close()
+		go func() {
+			select {
+			case <-ctx.Done():
+				cl.Close()
+			case <-doneCh:
+				// So we don't leave dangling goroutines on reconnect
+			}
 		}()
 
 		for {
