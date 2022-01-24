@@ -35,10 +35,6 @@ func New() (*Display, error) {
 		return nil, fmt.Errorf("got a nil display")
 	}
 
-	// go func() {
-	// 	C.wl_display_dispatch(state.display)
-	// }()
-
 	return &Display{
 		state: state,
 	}, nil
