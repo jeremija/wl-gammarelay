@@ -9,13 +9,17 @@ typedef struct {
 } color_setting_t;
 
 typedef struct {
+	struct wl_registry *registry;
+
 	struct wl_display *display;
 
 	struct wl_list outputs;
 
 	struct zwlr_gamma_control_manager_v1 *gamma_control_manager;
-} wl_gammarelay_state_t;
+} wl_gammarelay_t;
 
-int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t setting);
+int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting);
 
-int wl_gammarelay_init(wl_gammarelay_state_t *state);
+wl_gammarelay_t *wl_gammarelay_init();
+
+void wl_gammarelay_destroy(wl_gammarelay_t *state);

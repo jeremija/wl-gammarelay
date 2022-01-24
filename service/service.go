@@ -25,6 +25,7 @@ type Service struct {
 
 type Display interface {
 	SetColor(display.ColorParams) error
+	Close()
 }
 
 type Params struct {
@@ -55,6 +56,8 @@ func New(params Params) *Service {
 }
 
 func (s *Service) Close() error {
+	s.params.Display.Close()
+
 	return s.params.Listener.Close()
 }
 

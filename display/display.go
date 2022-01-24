@@ -1,7 +1,5 @@
 package display
 
-// TODO figure out how to compile C files from different subfolders.
-
 /*
 #cgo CFLAGS: -I${SRCDIR}/../protocol
 #cgo LDFLAGS: -lwayland-client -lm
@@ -16,18 +14,13 @@ import (
 
 // Display is a wrapper around a Wayland display.
 type Display struct {
-	state *C.wl_gammarelay_state_t
+	state *C.wl_gammarelay_t
 }
 
 // NewDisplay connects to Wayland server and gets a hold of the display.
-//
-// TODO The current naive implementation does not have a way to free any of the
-// resources acquired.
 func New() (*Display, error) {
-	state := &C.wl_gammarelay_state_t{}
-
-	ret := C.wl_gammarelay_init(state)
-	if ret != 0 {
+	state := C.wl_gammarelay_init()
+	if state == nil {
 		panic("failed to initialize gammarelay")
 	}
 
@@ -82,4 +75,12 @@ func (d *Display) SetColor(p ColorParams) error {
 	}
 
 	return nil
+}
+
+func (d *Display) Close() {
+	if d.state == nil {
+		return
+	}
+
+	C.wl_gammarelay_destroy(d.state)
 }
