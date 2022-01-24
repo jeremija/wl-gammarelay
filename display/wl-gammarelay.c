@@ -364,7 +364,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 		uint32_t name, const char *interface, uint32_t version) {
 	wl_gammarelay_state_t *state = data;
 
-	fprintf(stderr, "name: %d, interface: %s\n", name, interface);
+	fprintf(stderr, "registry handle name: %d, interface: %s\n", name, interface);
 
 	if (strcmp(interface, wl_output_interface.name) == 0) {
 		fprintf(stderr, "got output name: %d, interface: %s\n", name, interface);
@@ -372,11 +372,19 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 		output->wl_output = wl_registry_bind(registry, name,
 			&wl_output_interface, 1);
 		wl_list_insert(&state->outputs, &output->link);
+
+		output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
+			state->gamma_control_manager, output->wl_output);
+		zwlr_gamma_control_v1_add_listener(output->gamma_control,
+			&gamma_control_listener, output);
+
 	} else if (strcmp(interface,
 			zwlr_gamma_control_manager_v1_interface.name) == 0) {
 		state->gamma_control_manager = wl_registry_bind(registry, name,
 			&zwlr_gamma_control_manager_v1_interface, 1);
 	}
+
+	wl_display_roundtrip(state->display);
 }
 
 static void registry_handle_global_remove(void *data,
@@ -410,13 +418,40 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size,
 int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t setting) {
 	struct output *output = NULL;
 
+	// First process all pending events that might have happened since this
+	// method was last called.
+	wl_display_roundtrip(state->display);
+
+	// If we had any newly added displays, initialize their gamma control.
+	wl_list_for_each(output, &state->outputs, link) {
+		if (output->gamma_control != NULL) {
+			continue;
+		}
+
+		output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
+			state->gamma_control_manager, output->wl_output);
+		zwlr_gamma_control_v1_add_listener(output->gamma_control,
+			&gamma_control_listener, output);
+	}
+
+	// Process all pending events.
+	wl_display_roundtrip(state->display);
+
+	/* struct output *output = NULL; */
+
 	if (state->gamma_control_manager == NULL) {
 		fprintf(stderr,
 			"compositor doesn't support wlr-gamma-control-unstable-v1\n");
 		return EXIT_FAILURE;
 	}
 
+		fprintf(stderr,
+				"color_set starting for each\n");
+
 	wl_list_for_each(output, &state->outputs, link) {
+		fprintf(stderr,
+				"processing output\n");
+
 		if (output->ramp_size == 0) {
 			fprintf(stderr,
 					"output does not have ramp_size set\n");
@@ -425,6 +460,8 @@ int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t settin
 
 		output->table_fd = create_gamma_table(output->ramp_size, &output->table);
 		if (output->table_fd < 0) {
+			fprintf(stderr,
+					"failed to create gamma table\n");
 			continue;
 		}
 
@@ -468,14 +505,14 @@ int wl_gammarelay_init(wl_gammarelay_state_t *state) {
 	wl_registry_add_listener(registry, &registry_listener, state);
 	wl_display_roundtrip(display);
 
-	struct output *output;
-	wl_list_for_each(output, &state->outputs, link) {
-		output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
-			state->gamma_control_manager, output->wl_output);
-		zwlr_gamma_control_v1_add_listener(output->gamma_control,
-			&gamma_control_listener, output);
-	}
-	wl_display_roundtrip(display);
+	/* struct output *output; */
+	/* wl_list_for_each(output, &state->outputs, link) { */
+	/* 	output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control( */
+	/* 		state->gamma_control_manager, output->wl_output); */
+	/* 	zwlr_gamma_control_v1_add_listener(output->gamma_control, */
+	/* 		&gamma_control_listener, output); */
+	/* } */
+	/* wl_display_roundtrip(display); */
 
 	return 0;
 }
