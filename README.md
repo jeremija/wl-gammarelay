@@ -35,7 +35,7 @@ temperature via keybindings in `swaywm`:
 ```config
 bindsym $mod+Control+Minus      exec wl-gammarelay -t -100
 bindsym $mod+Control+Equal      exec wl-gammarelay -t +100
-bindsym $mod+Control+0          exec killall wl-gammarelay
+bindsym $mod+Control+0          exec wl-gammarelay -t 6500 -b 1
 bindsym $mod+Control+Underscore exec wl-gammarelay -b -0.02
 bindsym $mod+Control+Plus       exec wl-gammarelay -b +0.02
 ```
