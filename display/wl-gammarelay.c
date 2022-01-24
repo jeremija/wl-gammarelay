@@ -1,3 +1,4 @@
+#include <wayland-util.h>
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <stdio.h>
@@ -296,6 +297,7 @@ colorramp_fill(uint16_t *gamma_r, uint16_t *gamma_g, uint16_t *gamma_b,
 struct output {
 	struct wl_output *wl_output;
 	struct zwlr_gamma_control_v1 *gamma_control;
+	uint32_t name;
 	uint32_t ramp_size;
 	int table_fd;
 	uint16_t *table;
@@ -369,6 +371,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 	if (strcmp(interface, wl_output_interface.name) == 0) {
 		fprintf(stderr, "got output name: %d, interface: %s\n", name, interface);
 		struct output *output = calloc(1, sizeof(struct output));
+		output->name = name;
 		output->wl_output = wl_registry_bind(registry, name,
 			&wl_output_interface, 1);
 		wl_list_insert(&state->outputs, &output->link);
@@ -390,7 +393,16 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 static void registry_handle_global_remove(void *data,
 		struct wl_registry *registry, uint32_t name) {
 	fprintf(stderr, "registry remove name: %d\n", name);
-	// Who cares?
+	wl_gammarelay_state_t *state = data;
+	struct output *output = NULL;
+
+	wl_list_for_each(output, &state->outputs, link) {
+		if (output->name == name) {
+			fprintf(stderr, "remove output: %d\n", name);
+			wl_list_remove(&output->link);
+			break;
+		}
+	}
 }
 
 static const struct wl_registry_listener registry_listener = {
@@ -504,15 +516,6 @@ int wl_gammarelay_init(wl_gammarelay_state_t *state) {
 	struct wl_registry *registry = wl_display_get_registry(display);
 	wl_registry_add_listener(registry, &registry_listener, state);
 	wl_display_roundtrip(display);
-
-	/* struct output *output; */
-	/* wl_list_for_each(output, &state->outputs, link) { */
-	/* 	output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control( */
-	/* 		state->gamma_control_manager, output->wl_output); */
-	/* 	zwlr_gamma_control_v1_add_listener(output->gamma_control, */
-	/* 		&gamma_control_listener, output); */
-	/* } */
-	/* wl_display_roundtrip(display); */
 
 	return 0;
 }
