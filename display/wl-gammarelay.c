@@ -1,3 +1,4 @@
+#include <wayland-client-core.h>
 #include <wayland-util.h>
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
@@ -299,10 +300,18 @@ struct output {
 	struct zwlr_gamma_control_v1 *gamma_control;
 	uint32_t name;
 	uint32_t ramp_size;
-	int table_fd;
-	uint16_t *table;
 	struct wl_list link;
 };
+
+int output_destroy(struct output *output) {
+	zwlr_gamma_control_v1_destroy(output->gamma_control);
+	output->gamma_control = NULL;
+
+	wl_output_destroy(output->wl_output);
+	output->wl_output = NULL;
+
+	free(output);
+}
 
 static int create_anonymous_file(off_t size) {
 	char template[] = "/tmp/wlroots-shared-XXXXXX";
@@ -325,8 +334,7 @@ static int create_anonymous_file(off_t size) {
 	return fd;
 }
 
-static int create_gamma_table(uint32_t ramp_size, uint16_t **table) {
-	size_t table_size = ramp_size * 3 * sizeof(uint16_t);
+static int create_gamma_table(size_t table_size, uint16_t **table) {
 	int fd = create_anonymous_file(table_size);
 	if (fd < 0) {
 		fprintf(stderr, "failed to create anonymous file\n");
@@ -364,7 +372,7 @@ static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
 
 static void registry_handle_global(void *data, struct wl_registry *registry,
 		uint32_t name, const char *interface, uint32_t version) {
-	wl_gammarelay_state_t *state = data;
+	wl_gammarelay_t *state = data;
 
 	fprintf(stderr, "registry handle name: %d, interface: %s\n", name, interface);
 
@@ -393,13 +401,17 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 static void registry_handle_global_remove(void *data,
 		struct wl_registry *registry, uint32_t name) {
 	fprintf(stderr, "registry remove name: %d\n", name);
-	wl_gammarelay_state_t *state = data;
+	wl_gammarelay_t *state = data;
 	struct output *output = NULL;
 
 	wl_list_for_each(output, &state->outputs, link) {
 		if (output->name == name) {
 			fprintf(stderr, "remove output: %d\n", name);
+
 			wl_list_remove(&output->link);
+
+			output_destroy(output);
+
 			break;
 		}
 	}
@@ -427,7 +439,7 @@ static void fill_gamma_table(uint16_t *table, uint32_t ramp_size,
 	colorramp_fill(r, g, b, ramp_size, setting);
 }
 
-int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t setting) {
+int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting) {
 	struct output *output = NULL;
 
 	// First process all pending events that might have happened since this
@@ -449,16 +461,16 @@ int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t settin
 	// Process all pending events.
 	wl_display_roundtrip(state->display);
 
-	/* struct output *output = NULL; */
-
 	if (state->gamma_control_manager == NULL) {
 		fprintf(stderr,
 			"compositor doesn't support wlr-gamma-control-unstable-v1\n");
 		return EXIT_FAILURE;
 	}
 
-		fprintf(stderr,
-				"color_set starting for each\n");
+	fprintf(stderr,
+			"color_set starting for each\n");
+
+	output = NULL;
 
 	wl_list_for_each(output, &state->outputs, link) {
 		fprintf(stderr,
@@ -470,23 +482,25 @@ int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t settin
 			continue;
 		}
 
-		output->table_fd = create_gamma_table(output->ramp_size, &output->table);
-		if (output->table_fd < 0) {
+		uint16_t *table = NULL;
+		size_t table_size = output->ramp_size * 3 * sizeof(uint16_t);
+
+		int table_fd = create_gamma_table(table_size, &table);
+		if (table_fd < 0) {
 			fprintf(stderr,
 					"failed to create gamma table\n");
 			continue;
 		}
 
-		fill_gamma_table(output->table, output->ramp_size,
+		fill_gamma_table(table, output->ramp_size,
 			&setting);
 		zwlr_gamma_control_v1_set_gamma(output->gamma_control,
-			output->table_fd);
+			table_fd);
 
-		close(output->table_fd);
+		close(table_fd);
 
 		// Clean up resources.
-		size_t table_size = output->ramp_size * 3 * sizeof(uint16_t);
-		if (munmap(output->table, table_size) == -1) {
+		if (munmap(table, table_size) == -1) {
 			fprintf(stderr,
 				"failed to munmap\n");
 			return EXIT_FAILURE;
@@ -502,20 +516,43 @@ int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t settin
 	return EXIT_SUCCESS;
 }
 
-int wl_gammarelay_init(wl_gammarelay_state_t *state) {
-	wl_list_init(&state->outputs);
+wl_gammarelay_t *wl_gammarelay_init() {
+	wl_gammarelay_t *state = calloc(1, sizeof(struct output));
 
-	struct wl_display *display = wl_display_connect(NULL);
-	if (display == NULL) {
+	state->display = wl_display_connect(NULL);
+	if (state->display == NULL) {
+		free(state);
 		fprintf(stderr, "failed to create display\n");
-		return -1;
+		return state;
 	}
 
-	state->display = display;
+	wl_list_init(&state->outputs);
 
-	struct wl_registry *registry = wl_display_get_registry(display);
-	wl_registry_add_listener(registry, &registry_listener, state);
-	wl_display_roundtrip(display);
+	state->registry = wl_display_get_registry(state->display);
+	wl_registry_add_listener(state->registry, &registry_listener, state);
+	wl_display_roundtrip(state->display);
 
-	return 0;
+	return state;
+}
+
+void wl_gammarelay_destroy(wl_gammarelay_t *state) {
+	struct output *output = NULL;
+
+	wl_list_for_each(output, &state->outputs, link) {
+		output_destroy(output);
+	}
+
+	if (state->gamma_control_manager) {
+		zwlr_gamma_control_manager_v1_destroy(state->gamma_control_manager);
+	}
+
+	if (state->registry) {
+		wl_registry_destroy(state->registry);
+	}
+
+	if (state->display) {
+		wl_display_disconnect(state->display);
+	}
+
+	free(state);
 }
