@@ -6,6 +6,7 @@ package display
 #cgo CFLAGS: -I${SRCDIR}/../protocol
 #cgo LDFLAGS: -lwayland-client -lm
 #include "wl-gammarelay.h"
+#include <wayland-client.h>
 #include "../protocol/wlr-gamma-control-unstable-v1-protocol.c"
 */
 import "C"
@@ -15,7 +16,7 @@ import (
 
 // Display is a wrapper around a Wayland display.
 type Display struct {
-	display *C.struct_wl_display
+	state *C.wl_gammarelay_state_t
 }
 
 // NewDisplay connects to Wayland server and gets a hold of the display.
@@ -23,19 +24,23 @@ type Display struct {
 // TODO The current naive implementation does not have a way to free any of the
 // resources acquired.
 func New() (*Display, error) {
-	var disp *C.struct_wl_display
+	state := &C.wl_gammarelay_state_t{}
 
-	ret := C.wl_gammarelay_init(&disp)
+	ret := C.wl_gammarelay_init(state)
 	if ret != 0 {
 		panic("failed to initialize gammarelay")
 	}
 
-	if disp == nil {
+	if state.display == nil {
 		return nil, fmt.Errorf("got a nil display")
 	}
 
+	go func() {
+		C.wl_display_dispatch(state.display)
+	}()
+
 	return &Display{
-		display: disp,
+		state: state,
 	}, nil
 }
 
@@ -71,7 +76,7 @@ func (d *Display) SetColor(p ColorParams) error {
 		C.float(1),
 	}
 
-	ret := C.wl_gammarelay_color_set(d.display, C.color_setting_t{
+	ret := C.wl_gammarelay_color_set(d.state, C.color_setting_t{
 		temperature: C.int(p.Temperature),
 		gamma:       gamma,
 		brightness:  C.float(p.Brightness),

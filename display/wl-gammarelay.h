@@ -1,4 +1,5 @@
 #include <wayland-client.h>
+#include "wlr-gamma-control-unstable-v1-client-protocol.h"
 
 /* Color setting */
 typedef struct {
@@ -7,6 +8,14 @@ typedef struct {
 	float brightness;
 } color_setting_t;
 
-int wl_gammarelay_color_set(struct wl_display *display, color_setting_t setting);
+typedef struct {
+	struct wl_display *display;
 
-int wl_gammarelay_init(struct wl_display **p_display);
+	struct wl_list outputs;
+
+	struct zwlr_gamma_control_manager_v1 *gamma_control_manager;
+} wl_gammarelay_state_t;
+
+int wl_gammarelay_color_set(wl_gammarelay_state_t *state, color_setting_t setting);
+
+int wl_gammarelay_init(wl_gammarelay_state_t *state);
