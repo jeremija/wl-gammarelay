@@ -46,7 +46,9 @@ Sample configuration for `waybar`:
 "modules-right": ["custom/wl-gammarelay"],
 "custom/wl-gammarelay": {
     "format": "{} ",
-    "exec": "wl-gammarelay --subscribe color | jq --unbuffered --compact-output -r -c '.updates[] | select(.key == \"color\") | .color | .temperature + \" \" + .brightness'"
+    "exec": "wl-gammarelay --subscribe color | jq --unbuffered --compact-output -r -c '.updates[] | select(.key == \"color\") | .color | .temperature + \" \" + .brightness'",
+    "on-scroll-up": "wl-gammarelay --no-daemon --temperature +100",
+    "on-scroll-down": "wl-gammarelay --no-daemon --temperature -100"
 }
 ```
 
