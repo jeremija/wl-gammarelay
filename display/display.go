@@ -31,7 +31,7 @@ type setColorRequest struct {
 func New() (*Display, error) {
 	state := C.wl_gammarelay_init()
 	if state == nil {
-		panic("failed to initialize gammarelay")
+		return nil, fmt.Errorf("failed to connect to display")
 	}
 
 	if state.display == nil {

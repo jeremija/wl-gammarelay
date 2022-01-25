@@ -545,13 +545,13 @@ int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting) {
 }
 
 wl_gammarelay_t *wl_gammarelay_init() {
-	wl_gammarelay_t *state = calloc(1, sizeof(struct output));
+	wl_gammarelay_t *state = calloc(1, sizeof(wl_gammarelay_t));
 
 	state->display = wl_display_connect(NULL);
 	if (state->display == NULL) {
 		free(state);
 		fprintf(stderr, "failed to create display\n");
-		return state;
+		return NULL;
 	}
 
 	state->display_fd = wl_display_get_fd(state->display);
@@ -619,9 +619,8 @@ void wl_gammarelay_destroy(wl_gammarelay_t *state) {
 
 	if (state->display) {
 		fprintf(stderr, "disconnect display\n");
-		// TODO figure out why this crashes after calling wl_display_get_fd.
-		/* wl_display_disconnect(state->display); */
-		/* state->display = NULL; */
+		wl_display_disconnect(state->display);
+		state->display = NULL;
 	}
 
 	fprintf(stderr, "free state\n");
