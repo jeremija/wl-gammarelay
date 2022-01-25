@@ -12,11 +12,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 )
 
 // Display is a wrapper around a Wayland display.
 type Display struct {
 	state *C.wl_gammarelay_t
+
+	wg sync.WaitGroup
 
 	setColorCh chan setColorRequest
 	teardownCh chan struct{}
@@ -44,15 +47,16 @@ func New() (*Display, error) {
 	d := &Display{
 		state:      state,
 		setColorCh: make(chan setColorRequest),
-		teardownCh: make(chan struct{}),
+		teardownCh: make(chan struct{}, 1),
 	}
 
 	doneCh := make(chan struct{})
 
-	go func() {
-		defer log.Println("poll goroutine done")
+	d.wg.Add(2)
 
-		// TODO figure out how to terminate the blocking C wl_gammarelay_poll call.
+	go func() {
+		defer d.wg.Done()
+		defer log.Println("poll goroutine done")
 
 		for {
 			select {
@@ -132,6 +136,7 @@ func New() (*Display, error) {
 	pollNow <- struct{}{}
 
 	go func() {
+		defer d.wg.Done()
 		defer close(doneCh)
 
 		for {
@@ -168,7 +173,7 @@ func New() (*Display, error) {
 			case req := <-d.setColorCh:
 				handleSetColor(req)
 			case <-d.teardownCh:
-				C.wl_gammarelay_destroy(d.state)
+				C.wl_gammarelay_interrupt(d.state)
 				return
 			}
 		}
@@ -229,8 +234,18 @@ func (d *Display) SetColor(ctx context.Context, p ColorParams) error {
 }
 
 func (d *Display) Close() {
+	if d.state == nil {
+		return
+	}
+
 	select {
 	case d.teardownCh <- struct{}{}:
+		d.wg.Wait()
+
+		// Only destroy after all goroutines have finished.
+		C.wl_gammarelay_destroy(d.state)
+
+		d.state = nil
 	default:
 	}
 }

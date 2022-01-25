@@ -15,6 +15,8 @@ typedef struct {
 
 	int display_fd;
 
+	int interrupt_fd;
+
 	int num_init_outputs;
 
 	struct wl_list outputs;
@@ -25,6 +27,8 @@ typedef struct {
 int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting);
 
 int wl_gammarelay_poll(wl_gammarelay_t *state);
+
+void wl_gammarelay_interrupt(wl_gammarelay_t *state);
 
 wl_gammarelay_t *wl_gammarelay_init();
 

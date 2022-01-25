@@ -8,6 +8,8 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/eventfd.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
@@ -556,20 +558,34 @@ wl_gammarelay_t *wl_gammarelay_init() {
 	wl_registry_add_listener(state->registry, &registry_listener, state);
 	wl_display_roundtrip(state->display);
 
+	state->interrupt_fd = eventfd(0, O_CLOEXEC);
+
 	return state;
 }
 
 int wl_gammarelay_poll(wl_gammarelay_t *state) {
-	struct pollfd pollfds[1];
+	struct pollfd pollfds[2];
 
 	pollfds[0].fd = state->display_fd;
 	pollfds[0].events = POLLIN;
 
-	fprintf(stderr, "starting poll: %d\n", state->display_fd);
+	pollfds[1].fd = state->interrupt_fd;
+	pollfds[1].events = POLLIN;
 
-	int r = poll(pollfds, 1, -1);
+	fprintf(stderr, "starting poll[0]: %d\n", state->display_fd);
+	fprintf(stderr, "starting poll[1]: %d\n", state->interrupt_fd);
+
+	int r = poll(pollfds, 2, -1);
 
 	fprintf(stderr, "poll result: %d\n", r);
+	fprintf(stderr, "poll result[0]: %d\n", pollfds[0].revents);
+	fprintf(stderr, "poll result[1]: %d\n", pollfds[1].revents);
+
+	if (pollfds[1].revents & POLLIN) {
+		fprintf(stderr, "read -999: %d\n", r);
+		return -999;
+	}
+
 
 	if (r == 0) {
 		// Timeout
@@ -587,6 +603,13 @@ int wl_gammarelay_poll(wl_gammarelay_t *state) {
 	/* } */
 
 	return r;
+}
+
+void wl_gammarelay_interrupt(wl_gammarelay_t *state) {
+	unsigned char buf[8] = {0};
+	memset(buf, 0x88, 8);
+	fprintf(stderr, "write interrupt_fd\n");
+	write(state->interrupt_fd, buf, 8);
 }
 
 void wl_gammarelay_destroy(wl_gammarelay_t *state) {
@@ -616,6 +639,9 @@ void wl_gammarelay_destroy(wl_gammarelay_t *state) {
 		wl_display_disconnect(state->display);
 		state->display = NULL;
 	}
+
+	fprintf(stderr, "close interrupt_fd %d\n", state->interrupt_fd);
+	close(state->interrupt_fd);
 
 	fprintf(stderr, "free state\n");
 	free(state);
