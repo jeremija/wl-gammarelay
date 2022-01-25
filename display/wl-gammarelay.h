@@ -13,6 +13,10 @@ typedef struct {
 
 	struct wl_display *display;
 
+	int display_fd;
+
+	int num_init_outputs;
+
 	struct wl_list outputs;
 
 	struct zwlr_gamma_control_manager_v1 *gamma_control_manager;
@@ -20,6 +24,10 @@ typedef struct {
 
 int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting);
 
+int wl_gammarelay_poll(wl_gammarelay_t *state);
+
 wl_gammarelay_t *wl_gammarelay_init();
 
 void wl_gammarelay_destroy(wl_gammarelay_t *state);
+
+int wl_gammarelay_num_init_outputs(wl_gammarelay_t *state);

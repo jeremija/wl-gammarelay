@@ -2,6 +2,7 @@
 #include <wayland-util.h>
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -304,11 +305,16 @@ struct output {
 };
 
 int output_destroy(struct output *output) {
-	zwlr_gamma_control_v1_destroy(output->gamma_control);
-	output->gamma_control = NULL;
+	if (output->gamma_control) {
+		zwlr_gamma_control_v1_destroy(output->gamma_control);
+		output->gamma_control = NULL;
+	}
 
-	wl_output_destroy(output->wl_output);
-	output->wl_output = NULL;
+	if (output->wl_output) {
+		wl_output_destroy(output->wl_output);
+		output->wl_output = NULL;
+	}
+
 
 	free(output);
 }
@@ -362,7 +368,6 @@ static void gamma_control_handle_gamma_size(void *data,
 static void gamma_control_handle_failed(void *data,
 		struct zwlr_gamma_control_v1 *gamma_control) {
 	fprintf(stderr, "failed to set gamma table\n");
-	/* exit(EXIT_FAILURE); */
 }
 
 static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
@@ -393,9 +398,18 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 			zwlr_gamma_control_manager_v1_interface.name) == 0) {
 		state->gamma_control_manager = wl_registry_bind(registry, name,
 			&zwlr_gamma_control_manager_v1_interface, 1);
-	}
 
-	wl_display_roundtrip(state->display);
+
+		// For each existing output, register gamma control.
+		struct output *output = NULL;
+
+		wl_list_for_each(output, &state->outputs, link) {
+			output->gamma_control = zwlr_gamma_control_manager_v1_get_gamma_control(
+				state->gamma_control_manager, output->wl_output);
+			zwlr_gamma_control_v1_add_listener(output->gamma_control,
+				&gamma_control_listener, output);
+		}
+	}
 }
 
 static void registry_handle_global_remove(void *data,
@@ -415,6 +429,20 @@ static void registry_handle_global_remove(void *data,
 			break;
 		}
 	}
+}
+
+int wl_gammarelay_num_init_outputs(wl_gammarelay_t *state) {
+	struct output *output = NULL;
+
+	int count = 0;
+
+	wl_list_for_each(output, &state->outputs, link) {
+		if (output->ramp_size > 0) {
+			count++;
+		}
+	}
+
+	return count;
 }
 
 static const struct wl_registry_listener registry_listener = {
@@ -444,7 +472,7 @@ int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting) {
 
 	// First process all pending events that might have happened since this
 	// method was last called.
-	wl_display_roundtrip(state->display);
+	/* wl_display_roundtrip(state->display); */
 
 	// If we had any newly added displays, initialize their gamma control.
 	wl_list_for_each(output, &state->outputs, link) {
@@ -459,12 +487,12 @@ int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting) {
 	}
 
 	// Process all pending events.
-	wl_display_roundtrip(state->display);
+	/* wl_display_roundtrip(state->display); */
 
 	if (state->gamma_control_manager == NULL) {
 		fprintf(stderr,
 			"compositor doesn't support wlr-gamma-control-unstable-v1\n");
-		return EXIT_FAILURE;
+		return -1;
 	}
 
 	fprintf(stderr,
@@ -503,17 +531,17 @@ int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting) {
 		if (munmap(table, table_size) == -1) {
 			fprintf(stderr,
 				"failed to munmap\n");
-			return EXIT_FAILURE;
+			return -1;
 		}
 	}
 
 	if (wl_display_flush(state->display) == -1) {
 		fprintf(stderr,
 			"failed to flush display\n");
-		return EXIT_FAILURE;
+		return -1;
 	}
 
-	return EXIT_SUCCESS;
+	return 0;
 }
 
 wl_gammarelay_t *wl_gammarelay_init() {
@@ -526,6 +554,8 @@ wl_gammarelay_t *wl_gammarelay_init() {
 		return state;
 	}
 
+	state->display_fd = wl_display_get_fd(state->display);
+
 	wl_list_init(&state->outputs);
 
 	state->registry = wl_display_get_registry(state->display);
@@ -535,24 +565,65 @@ wl_gammarelay_t *wl_gammarelay_init() {
 	return state;
 }
 
+int wl_gammarelay_poll(wl_gammarelay_t *state) {
+	struct pollfd pollfds[1];
+
+	pollfds[0].fd = state->display_fd;
+	pollfds[0].events = POLLIN;
+
+	fprintf(stderr, "starting poll: %d\n", state->display_fd);
+
+	int r = poll(pollfds, 1, -1);
+
+	fprintf(stderr, "poll result: %d\n", r);
+
+	if (r == 0) {
+		// Timeout
+		return 0;
+	}
+
+	if (r < 0) {
+		fprintf(stderr, "poll errno: %d\n", errno);
+		return -1;
+	}
+
+	/* if (errno == EINTR) { */
+	/* 	// Interrupt. */
+	/* 	return 0; */
+	/* } */
+
+	return r;
+}
+
 void wl_gammarelay_destroy(wl_gammarelay_t *state) {
+	fprintf(stderr, "wl_gammarelay_destroy\n");
+
 	struct output *output = NULL;
 
 	wl_list_for_each(output, &state->outputs, link) {
+		fprintf(stderr, "destroy output\n");
 		output_destroy(output);
 	}
 
 	if (state->gamma_control_manager) {
+		fprintf(stderr, "destroy gamma control manager\n");
 		zwlr_gamma_control_manager_v1_destroy(state->gamma_control_manager);
+		state->gamma_control_manager = NULL;
 	}
 
 	if (state->registry) {
+		fprintf(stderr, "destroy registry\n");
 		wl_registry_destroy(state->registry);
+		state->registry = NULL;
 	}
 
 	if (state->display) {
-		wl_display_disconnect(state->display);
+		fprintf(stderr, "disconnect display\n");
+		// TODO figure out why this crashes after calling wl_display_get_fd.
+		/* wl_display_disconnect(state->display); */
+		/* state->display = NULL; */
 	}
 
+	fprintf(stderr, "free state\n");
 	free(state);
 }
