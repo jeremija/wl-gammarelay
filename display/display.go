@@ -41,38 +41,44 @@ func New() (*Display, error) {
 	pollNow := make(chan struct{}, 1)
 	pollResult := make(chan struct{}, 1)
 
-	// defer close(pollNow) // FIXME
-
 	d := &Display{
 		state:      state,
 		setColorCh: make(chan setColorRequest),
 		teardownCh: make(chan struct{}),
 	}
 
+	doneCh := make(chan struct{})
+
 	go func() {
 		defer log.Println("poll goroutine done")
 
-		// TODO figure out how to terminate this goroutine on close.
+		// TODO figure out how to terminate the blocking C wl_gammarelay_poll call.
 
-		for range pollNow {
-			log.Println("poll goroutine done")
-			ret := C.wl_gammarelay_poll(state)
-			log.Println("poll ret", ret)
-
-			if ret < 0 {
-				log.Println("pollResult close")
-				close(pollResult)
-				return
-			}
-
-			if ret == 0 {
-				// timeout
-				continue
-			}
-
+		for {
 			select {
-			case pollResult <- struct{}{}:
-			default:
+			case <-pollNow:
+				log.Println("poll start")
+				ret := C.wl_gammarelay_poll(state)
+				log.Println("poll ret", ret)
+
+				if ret < 0 {
+					log.Println("pollResult close")
+					close(pollResult)
+					return
+				}
+
+				if ret == 0 {
+					// timeout
+					continue
+				}
+
+				select {
+				case pollResult <- struct{}{}:
+				case <-doneCh:
+					return
+				}
+			case <-doneCh:
+				return
 			}
 		}
 	}()
@@ -117,10 +123,17 @@ func New() (*Display, error) {
 	}
 
 	handlePoll := func() int {
-		return int(C.wl_display_dispatch(state.display))
+		log.Println("wl_display_dispatch start")
+		ret := int(C.wl_display_dispatch(state.display))
+		log.Println("wl_display_dispatch end")
+		return ret
 	}
 
+	pollNow <- struct{}{}
+
 	go func() {
+		defer close(doneCh)
+
 		for {
 			C.wl_display_dispatch_pending(state.display)
 			C.wl_display_flush(state.display)
@@ -141,11 +154,6 @@ func New() (*Display, error) {
 			log.Printf("Number of outputs: %d\n", numOutputs)
 
 			select {
-			case pollNow <- struct{}{}:
-			default: // Channel already full, already waiting to poll.
-			}
-
-			select {
 			case _, ok := <-pollResult:
 				if !ok {
 					log.Println("pollResult chan closed")
@@ -153,6 +161,8 @@ func New() (*Display, error) {
 				}
 
 				ret := handlePoll()
+
+				pollNow <- struct{}{}
 
 				log.Println("handlePoll result", ret)
 			case req := <-d.setColorCh:

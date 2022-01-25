@@ -535,12 +535,6 @@ int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting) {
 		}
 	}
 
-	if (wl_display_flush(state->display) == -1) {
-		fprintf(stderr,
-			"failed to flush display\n");
-		return -1;
-	}
-
 	return 0;
 }
 
