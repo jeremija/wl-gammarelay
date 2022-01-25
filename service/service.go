@@ -24,7 +24,7 @@ type Service struct {
 }
 
 type Display interface {
-	SetColor(display.ColorParams) error
+	SetColor(context.Context, display.ColorParams) error
 	Close()
 }
 
@@ -258,7 +258,7 @@ func (s *Service) handleRequest(ctx context.Context, rwr requestWithResponse) {
 			return
 		}
 
-		err = s.params.Display.SetColor(colorParams)
+		err = s.params.Display.SetColor(ctx, colorParams)
 		if err != nil {
 			log.Printf("Failed to set color: %s\n", err)
 
