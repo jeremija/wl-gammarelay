@@ -30,7 +30,7 @@ type setColorRequest struct {
 	errCh  chan<- error
 }
 
-// NewDisplay connects to Wayland server and gets a hold of the display.
+// New connects to Wayland server and gets a hold of the display.
 func New() (*Display, error) {
 	state := C.wl_gammarelay_init()
 	if state == nil {
