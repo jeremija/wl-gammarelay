@@ -11,15 +11,17 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
+
+	"github.com/peer-calls/log"
 )
 
 // Display is a wrapper around a Wayland display.
 type Display struct {
 	state *C.wl_gammarelay_t
 
-	wg sync.WaitGroup
+	log log.Logger
+	wg  sync.WaitGroup
 
 	setColorCh chan setColorRequest
 	teardownCh chan struct{}
@@ -31,7 +33,7 @@ type setColorRequest struct {
 }
 
 // New connects to Wayland server and gets a hold of the display.
-func New() (*Display, error) {
+func New(logger log.Logger) (*Display, error) {
 	state := C.wl_gammarelay_init()
 	if state == nil {
 		return nil, fmt.Errorf("failed to connect to display")
@@ -46,6 +48,7 @@ func New() (*Display, error) {
 
 	d := &Display{
 		state:      state,
+		log:        logger,
 		setColorCh: make(chan setColorRequest),
 		teardownCh: make(chan struct{}, 1),
 	}
@@ -56,17 +59,19 @@ func New() (*Display, error) {
 
 	go func() {
 		defer d.wg.Done()
-		defer log.Println("poll goroutine done")
+		defer d.log.Trace("poll goroutine done", nil)
 
 		for {
 			select {
 			case <-pollNow:
-				log.Println("poll start")
+				d.log.Trace("wl_gammarelay_poll CALL", nil)
 				ret := C.wl_gammarelay_poll(state)
-				log.Println("poll ret", ret)
+				d.log.Trace("wl_gammarelay_poll DONE", nil)
 
 				if ret < 0 {
-					log.Println("pollResult close")
+					d.log.Trace("wl_gammarelay_poll pollResult close", log.Ctx{
+						"ret": ret,
+					})
 					close(pollResult)
 					return
 				}
@@ -127,9 +132,9 @@ func New() (*Display, error) {
 	}
 
 	handlePoll := func() int {
-		log.Println("wl_display_dispatch start")
+		d.log.Trace("wl_display_dispatch CALL", nil)
 		ret := int(C.wl_display_dispatch(state.display))
-		log.Println("wl_display_dispatch end")
+		d.log.Trace("wl_display_dispatch DONE", nil)
 		return ret
 	}
 
@@ -145,9 +150,13 @@ func New() (*Display, error) {
 
 			numOutputs := int(C.wl_gammarelay_num_init_outputs(state))
 			if numOutputs != lastNumOutputs {
-				fmt.Println("calling setColor", numOutputs, lastNumOutputs)
+				d.log.Trace("setColor CALL", log.Ctx{
+					"num_outputs":      numOutputs,
+					"last_num_ouptuts": lastNumOutputs,
+				})
+
 				if err := setColor(lastColor); err != nil {
-					log.Println("failed to set color")
+					d.log.Error("Failed to set color", err, nil)
 				}
 
 				C.wl_display_dispatch_pending(state.display)
@@ -156,20 +165,24 @@ func New() (*Display, error) {
 				lastNumOutputs = numOutputs
 			}
 
-			log.Printf("Number of outputs: %d\n", numOutputs)
+			d.log.Trace("Main loop iteration", log.Ctx{
+				"num_outputs": numOutputs,
+			})
 
 			select {
 			case _, ok := <-pollResult:
 				if !ok {
-					log.Println("pollResult chan closed")
+					d.log.Trace("Main loop pollResult chan closed", nil)
 					return
 				}
 
-				ret := handlePoll()
+				d.log.Trace("handlePoll CALL", nil)
+				_ = handlePoll()
+				d.log.Trace("handlePoll DONE", nil)
 
+				d.log.Trace("pollNow SEND", nil)
 				pollNow <- struct{}{}
-
-				log.Println("handlePoll result", ret)
+				d.log.Trace("pollNow SENT", nil)
 			case req := <-d.setColorCh:
 				handleSetColor(req)
 			case <-d.teardownCh:

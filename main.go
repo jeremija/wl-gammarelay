@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/jeremija/wl-gammarelay/display"
+	"github.com/peer-calls/log"
 	"github.com/spf13/pflag"
 )
 
@@ -66,6 +67,17 @@ func main2(args Arguments) error {
 		return nil
 	}
 
+	logger := log.New().WithNamespace("wl-gammarelay")
+	level := log.LevelInfo
+	if args.Verbose {
+		level = log.LevelTrace
+	}
+
+	logger = logger.WithConfig(log.NewConfig(log.ConfigMap{
+		"wl-gammarelay":    level,
+		"wl-gammarelay:**": level,
+	}))
+
 	ctx := context.Background()
 
 	// We need to handle these events so that the listener removes the socket
@@ -74,14 +86,14 @@ func main2(args Arguments) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGPIPE)
 	defer cancel()
 
-	disp, err := display.New()
+	disp, err := display.New(logger)
 	if err != nil {
 		return fmt.Errorf("failed to open display: %w", err)
 	}
 
 	defer disp.Close()
 
-	conn, err := NewDBus(ctx, disp)
+	conn, err := NewDBus(ctx, logger, disp)
 	if err != nil {
 		return fmt.Errorf("failed to connect to dbus: %w", err)
 	}

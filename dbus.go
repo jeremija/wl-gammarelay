@@ -9,6 +9,7 @@ import (
 	"github.com/godbus/dbus/v5/introspect"
 	"github.com/godbus/dbus/v5/prop"
 	"github.com/jeremija/wl-gammarelay/display"
+	"github.com/peer-calls/log"
 )
 
 const (
@@ -16,6 +17,9 @@ const (
 	dbusObjectPath    = "/"
 	dbusInterfaceName = "rs.wl.gammarelay"
 	introspectable    = "org.freedesktop.DBus.Introspectable"
+
+	temperatureProp = "Temperature"
+	brightnessProp  = "Brightness"
 )
 
 type srv struct {
@@ -27,12 +31,10 @@ func (s *srv) UpdateTemperature(temperature int16) (err *dbus.Error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	v, err := s.props.Get(dbusInterfaceName, "Temperature")
+	v, err := s.props.Get(dbusInterfaceName, temperatureProp)
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("Temp: %s %v %T\n", v.Value(), v.Value(), v.Value())
 
 	var value uint16
 
@@ -47,16 +49,14 @@ func (s *srv) UpdateTemperature(temperature int16) (err *dbus.Error) {
 
 	value = uint16(int16(value) + temperature)
 
-	fmt.Printf("test: %T %T\n", value, dbus.MakeVariant(value).Value())
-
-	return s.props.Set(dbusInterfaceName, "Temperature", dbus.MakeVariant(value))
+	return s.props.Set(dbusInterfaceName, temperatureProp, dbus.MakeVariant(value))
 }
 
 func (s *srv) UpdateBrightness(brightness float64) (err *dbus.Error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	v, err := s.props.Get(dbusInterfaceName, "Brightness")
+	v, err := s.props.Get(dbusInterfaceName, brightnessProp)
 	if err != nil {
 		return err
 	}
@@ -69,21 +69,19 @@ func (s *srv) UpdateBrightness(brightness float64) (err *dbus.Error) {
 	case *float64:
 		value = *t
 	default:
-		return dbus.MakeFailedError(fmt.Errorf("value is not int16: %T", v.Value()))
+		return dbus.MakeFailedError(fmt.Errorf("value is not double: %T", v.Value()))
 	}
 
 	value += brightness
 
-	fmt.Println("setting brightness", value)
-
-	return s.props.Set(dbusInterfaceName, "Brightness", dbus.MakeVariant(value))
+	return s.props.Set(dbusInterfaceName, brightnessProp, dbus.MakeVariant(value))
 }
 
 type Display interface {
 	SetColor(context.Context, display.ColorParams) error
 }
 
-func NewDBus(ctx context.Context, disp Display) (*dbus.Conn, error) {
+func NewDBus(ctx context.Context, logger log.Logger, disp Display) (*dbus.Conn, error) {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return nil, fmt.Errorf("falied to connect to dbus: %w", err)
@@ -109,21 +107,19 @@ func NewDBus(ctx context.Context, disp Display) (*dbus.Conn, error) {
 
 		propsSpec := map[string]map[string]*prop.Prop{
 			dbusInterfaceName: {
-				"Temperature": {
+				temperatureProp: {
 					Value:    uint16(data.temp),
 					Writable: true,
 					Emit:     prop.EmitTrue,
 					Callback: func(c *prop.Change) *dbus.Error {
-						fmt.Println("Temperature callback")
 						temp, _ := c.Value.(uint16)
 
-						fmt.Println("Calling SetColor")
 						err := disp.SetColor(ctx, display.ColorParams{
 							Temperature: int(temp),
 							Brightness:  float32(data.brightness),
 						})
 						if err != nil {
-							fmt.Println("Failed to set color")
+							logger.Error("Failed to set temperature", err, nil)
 							return dbus.MakeFailedError(fmt.Errorf("failed to set color: %w", err))
 						}
 
@@ -132,7 +128,7 @@ func NewDBus(ctx context.Context, disp Display) (*dbus.Conn, error) {
 						return nil
 					},
 				},
-				"Brightness": {
+				brightnessProp: {
 					Value:    float64(data.brightness),
 					Writable: true,
 					Emit:     prop.EmitTrue,
@@ -144,7 +140,7 @@ func NewDBus(ctx context.Context, disp Display) (*dbus.Conn, error) {
 							Brightness:  float32(bri),
 						})
 						if err != nil {
-							fmt.Println("Failed to set color")
+							logger.Error("Failed to set brightness", err, nil)
 							return dbus.MakeFailedError(fmt.Errorf("failed to set color: %w", err))
 						}
 

@@ -381,10 +381,10 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 		uint32_t name, const char *interface, uint32_t version) {
 	wl_gammarelay_t *state = data;
 
-	fprintf(stderr, "registry handle name: %d, interface: %s\n", name, interface);
+	/* fprintf(stderr, "registry handle name: %d, interface: %s\n", name, interface); */
 
 	if (strcmp(interface, wl_output_interface.name) == 0) {
-		fprintf(stderr, "got output name: %d, interface: %s\n", name, interface);
+		/* fprintf(stderr, "got output name: %d, interface: %s\n", name, interface); */
 		struct output *output = calloc(1, sizeof(struct output));
 		output->name = name;
 		output->wl_output = wl_registry_bind(registry, name,
@@ -497,15 +497,9 @@ int wl_gammarelay_color_set(wl_gammarelay_t *state, color_setting_t setting) {
 		return -1;
 	}
 
-	fprintf(stderr,
-			"color_set starting for each\n");
-
 	output = NULL;
 
 	wl_list_for_each(output, &state->outputs, link) {
-		fprintf(stderr,
-				"processing output\n");
-
 		if (output->ramp_size == 0) {
 			fprintf(stderr,
 					"output does not have ramp_size set\n");
@@ -572,17 +566,9 @@ int wl_gammarelay_poll(wl_gammarelay_t *state) {
 	pollfds[1].fd = state->interrupt_fd;
 	pollfds[1].events = POLLIN;
 
-	fprintf(stderr, "starting poll[0]: %d\n", state->display_fd);
-	fprintf(stderr, "starting poll[1]: %d\n", state->interrupt_fd);
-
 	int r = poll(pollfds, 2, -1);
 
-	fprintf(stderr, "poll result: %d\n", r);
-	fprintf(stderr, "poll result[0]: %d\n", pollfds[0].revents);
-	fprintf(stderr, "poll result[1]: %d\n", pollfds[1].revents);
-
 	if (pollfds[1].revents & POLLIN) {
-		fprintf(stderr, "read -999: %d\n", r);
 		return -999;
 	}
 
@@ -593,14 +579,8 @@ int wl_gammarelay_poll(wl_gammarelay_t *state) {
 	}
 
 	if (r < 0) {
-		fprintf(stderr, "poll errno: %d\n", errno);
 		return -1;
 	}
-
-	/* if (errno == EINTR) { */
-	/* 	// Interrupt. */
-	/* 	return 0; */
-	/* } */
 
 	return r;
 }
@@ -608,41 +588,32 @@ int wl_gammarelay_poll(wl_gammarelay_t *state) {
 void wl_gammarelay_interrupt(wl_gammarelay_t *state) {
 	unsigned char buf[8] = {0};
 	memset(buf, 0x88, 8);
-	fprintf(stderr, "write interrupt_fd\n");
 	write(state->interrupt_fd, buf, 8);
 }
 
 void wl_gammarelay_destroy(wl_gammarelay_t *state) {
-	fprintf(stderr, "wl_gammarelay_destroy\n");
-
 	struct output *output = NULL;
 
 	wl_list_for_each(output, &state->outputs, link) {
-		fprintf(stderr, "destroy output\n");
 		output_destroy(output);
 	}
 
 	if (state->gamma_control_manager) {
-		fprintf(stderr, "destroy gamma control manager\n");
 		zwlr_gamma_control_manager_v1_destroy(state->gamma_control_manager);
 		state->gamma_control_manager = NULL;
 	}
 
 	if (state->registry) {
-		fprintf(stderr, "destroy registry\n");
 		wl_registry_destroy(state->registry);
 		state->registry = NULL;
 	}
 
 	if (state->display) {
-		fprintf(stderr, "disconnect display\n");
 		wl_display_disconnect(state->display);
 		state->display = NULL;
 	}
 
-	fprintf(stderr, "close interrupt_fd %d\n", state->interrupt_fd);
 	close(state->interrupt_fd);
 
-	fprintf(stderr, "free state\n");
 	free(state);
 }
