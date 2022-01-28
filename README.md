@@ -43,6 +43,8 @@ adjustments.
 Sample hotkey configuration for `sway`:
 
 ```config
+exec wl-gammarelay
+
 bindsym $mod+Control+Minus      exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n -100
 bindsym $mod+Control+Equal      exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n +100
 bindsym $mod+Control+0          exec busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1.0 && busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 6500
@@ -52,11 +54,15 @@ bindsym $mod+Control+Plus       exec busctl --user -- call rs.wl-gammarelay / rs
 
 Sample configuration for `waybar`:
 
-```config
-"modules-right": ["custom/wl-gammarelay"],
-"custom/wl-gammarelay": {
+```json
+{
+  "modules-right": ["custom/wl-gammarelay"],
+  "custom/wl-gammarelay": {
     "format": "{} ",
     "exec": "wl-gammarelay --subscribe"
+    "on-scroll-up": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n +100",
+    "on-scroll-down": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n -100"
+  }
 }
 ```
 
