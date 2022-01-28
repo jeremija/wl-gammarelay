@@ -11,7 +11,7 @@ all: protocol build
 
 .PHONY: build
 build: bin
-	go build $(BUILD_FLAGS) -o bin/wl-gammarelay main.go
+	go build $(BUILD_FLAGS) -o bin/wl-gammarelay ./
 
 bin:
 	mkdir -p bin/
