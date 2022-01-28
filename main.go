@@ -18,8 +18,9 @@ var (
 )
 
 type Arguments struct {
-	Version bool
-	Verbose bool
+	Version   bool
+	Verbose   bool
+	Subscribe bool
 }
 
 func parseArgs(argsSlice []string) (Arguments, error) {
@@ -34,6 +35,7 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 		fs.PrintDefaults()
 	}
 
+	fs.BoolVarP(&args.Subscribe, "subscribe", "s", false, "Only subscribe to changes")
 	fs.BoolVarP(&args.Version, "version", "V", false, "Print version and exit")
 	fs.BoolVarP(&args.Verbose, "verbose", "v", false, "Print client socket request and response messages")
 
@@ -85,6 +87,10 @@ func main2(args Arguments) error {
 	// time.
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGPIPE)
 	defer cancel()
+
+	if args.Subscribe {
+		return NewSubscriber(ctx)
+	}
 
 	disp, err := display.New(logger)
 	if err != nil {

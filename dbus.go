@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 
 	"github.com/godbus/dbus/v5"
@@ -18,8 +20,8 @@ const (
 	dbusInterfaceName = "rs.wl.gammarelay"
 	introspectable    = "org.freedesktop.DBus.Introspectable"
 
-	temperatureProp = "Temperature"
-	brightnessProp  = "Brightness"
+	propTemperature = "Temperature"
+	propBrightness  = "Brightness"
 )
 
 type srv struct {
@@ -31,7 +33,7 @@ func (s *srv) UpdateTemperature(temperature int16) (err *dbus.Error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	v, err := s.props.Get(dbusInterfaceName, temperatureProp)
+	v, err := s.props.Get(dbusInterfaceName, propTemperature)
 	if err != nil {
 		return err
 	}
@@ -49,14 +51,14 @@ func (s *srv) UpdateTemperature(temperature int16) (err *dbus.Error) {
 
 	value = uint16(int16(value) + temperature)
 
-	return s.props.Set(dbusInterfaceName, temperatureProp, dbus.MakeVariant(value))
+	return s.props.Set(dbusInterfaceName, propTemperature, dbus.MakeVariant(value))
 }
 
 func (s *srv) UpdateBrightness(brightness float64) (err *dbus.Error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	v, err := s.props.Get(dbusInterfaceName, brightnessProp)
+	v, err := s.props.Get(dbusInterfaceName, propBrightness)
 	if err != nil {
 		return err
 	}
@@ -74,7 +76,7 @@ func (s *srv) UpdateBrightness(brightness float64) (err *dbus.Error) {
 
 	value += brightness
 
-	return s.props.Set(dbusInterfaceName, brightnessProp, dbus.MakeVariant(value))
+	return s.props.Set(dbusInterfaceName, propBrightness, dbus.MakeVariant(value))
 }
 
 type Display interface {
@@ -107,7 +109,7 @@ func NewDBus(ctx context.Context, logger log.Logger, disp Display) (*dbus.Conn, 
 
 		propsSpec := map[string]map[string]*prop.Prop{
 			dbusInterfaceName: {
-				temperatureProp: {
+				propTemperature: {
 					Value:    uint16(data.temp),
 					Writable: true,
 					Emit:     prop.EmitTrue,
@@ -128,7 +130,7 @@ func NewDBus(ctx context.Context, logger log.Logger, disp Display) (*dbus.Conn, 
 						return nil
 					},
 				},
-				brightnessProp: {
+				propBrightness: {
 					Value:    float64(data.brightness),
 					Writable: true,
 					Emit:     prop.EmitTrue,
@@ -195,4 +197,96 @@ func NewDBus(ctx context.Context, logger log.Logger, disp Display) (*dbus.Conn, 
 	}
 
 	return conn, nil
+}
+
+type Subscriber struct {
+	*dbus.Conn
+}
+
+func NewSubscriber(ctx context.Context) error {
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to connect to session bus:", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	status := struct {
+		temperature uint16
+		brightness  float64
+	}{
+		temperature: 6500,
+		brightness:  1.0,
+	}
+
+	obj := conn.Object(dbusServiceName, dbusObjectPath)
+
+	call := conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0,
+		"eavesdrop='true',type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='"+dbusObjectPath+"'")
+	if call.Err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to add match:", call.Err)
+		os.Exit(1)
+	}
+
+	if v, err := obj.GetProperty(dbusInterfaceName + "." + propTemperature); err == nil {
+		status.temperature = v.Value().(uint16)
+	} else {
+		fmt.Println(err)
+	}
+
+	if v, err := obj.GetProperty(dbusInterfaceName + "." + propBrightness); err == nil {
+		status.brightness = v.Value().(float64)
+	}
+
+	fmt.Fprintf(os.Stdout, "%d %s\n",
+		status.temperature, strconv.FormatFloat(status.brightness, 'f', 2, 64))
+
+	c := make(chan *dbus.Message, 100)
+	conn.Eavesdrop(c)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case v, ok := <-c:
+			if !ok {
+				return nil
+			}
+			if iface := v.Body[0]; iface != dbusInterfaceName {
+				continue
+			}
+
+			if len(v.Body) < 2 {
+				continue
+			}
+
+			m, ok := v.Body[1].(map[string]dbus.Variant)
+			if !ok {
+				continue
+			}
+
+			shouldPrint := false
+
+			temperature, ok := m["Temperature"]
+			if ok {
+				if v, ok := temperature.Value().(uint16); ok {
+					status.temperature = v
+					shouldPrint = true
+				}
+			}
+
+			brightness, ok := m["Brightness"]
+			if ok {
+				if v, ok := brightness.Value().(float64); ok {
+					status.brightness = v
+					shouldPrint = true
+				}
+			}
+
+			if shouldPrint {
+				fmt.Fprintf(os.Stdout, "%d %s\n",
+					status.temperature, strconv.FormatFloat(status.brightness, 'f', 2, 64))
+			}
+		}
+	}
 }
