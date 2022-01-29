@@ -48,20 +48,26 @@ exec wl-gammarelay
 bindsym $mod+Control+Minus      exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n -100
 bindsym $mod+Control+Equal      exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n +100
 bindsym $mod+Control+0          exec busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1.0 && busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 6500
-bindsym $mod+Control+Underscore exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d -0.2
-bindsym $mod+Control+Plus       exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d +0.2
+bindsym $mod+Control+Underscore exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d -0.02
+bindsym $mod+Control+Plus       exec busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d +0.02
 ```
 
 Sample configuration for `waybar`:
 
 ```json
 {
-  "modules-right": ["custom/wl-gammarelay"],
-  "custom/wl-gammarelay": {
-    "format": "{} ",
-    "exec": "wl-gammarelay --subscribe"
+  "modules-right": ["custom/wl-gammarelay-temperature", "custom/wl-gammarelay-brightness"],
+  "custom/wl-gammarelay-temperature": {
+    "format": "{} ",
+    "exec": "wl-gammarelay --subscribe Temperature",
     "on-scroll-up": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n +100",
     "on-scroll-down": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n -100"
+  },
+  "custom/wl-gammarelay-brightness": {
+    "format": "{} ",
+    "exec": "wl-gammarelay --subscribe Brightness",
+    "on-scroll-up": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d +0.02",
+    "on-scroll-down": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d -0.02"
   }
 }
 ```

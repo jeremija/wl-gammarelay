@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/godbus/dbus/v5"
@@ -203,7 +204,34 @@ type Subscriber struct {
 	*dbus.Conn
 }
 
-func NewSubscriber(ctx context.Context) error {
+type state struct {
+	temperature uint16
+	brightness  float64
+}
+
+func (s state) Format(sb strings.Builder, props []string) string {
+	sb.Reset()
+
+	for _, prop := range props {
+		switch prop {
+		case propTemperature:
+			sb.WriteString(strconv.Itoa(int(s.temperature)))
+		case propBrightness:
+			sb.WriteString(strconv.FormatFloat(s.brightness, 'f', 2, 64))
+		}
+
+		sb.WriteString(" ")
+	}
+
+	return strings.TrimSuffix(sb.String(), " ")
+}
+
+func NewSubscriber(ctx context.Context, props []string) error {
+	propsSet := make(map[string]struct{}, len(props))
+	for _, p := range props {
+		propsSet[p] = struct{}{}
+	}
+
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to connect to session bus:", err)
@@ -211,10 +239,7 @@ func NewSubscriber(ctx context.Context) error {
 	}
 	defer conn.Close()
 
-	status := struct {
-		temperature uint16
-		brightness  float64
-	}{
+	status := state{
 		temperature: 6500,
 		brightness:  1.0,
 	}
@@ -238,8 +263,9 @@ func NewSubscriber(ctx context.Context) error {
 		status.brightness = v.Value().(float64)
 	}
 
-	fmt.Fprintf(os.Stdout, "%d %s\n",
-		status.temperature, strconv.FormatFloat(status.brightness, 'f', 2, 64))
+	var sb strings.Builder
+
+	fmt.Fprintf(os.Stdout, status.Format(sb, props)+"\n")
 
 	c := make(chan *dbus.Message, 100)
 	conn.Eavesdrop(c)
@@ -267,25 +293,28 @@ func NewSubscriber(ctx context.Context) error {
 
 			shouldPrint := false
 
-			temperature, ok := m["Temperature"]
-			if ok {
-				if v, ok := temperature.Value().(uint16); ok {
-					status.temperature = v
-					shouldPrint = true
+			if _, ok := propsSet[propTemperature]; ok {
+				temperature, ok := m[propTemperature]
+				if ok {
+					if v, ok := temperature.Value().(uint16); ok {
+						status.temperature = v
+						shouldPrint = true
+					}
 				}
 			}
 
-			brightness, ok := m["Brightness"]
-			if ok {
-				if v, ok := brightness.Value().(float64); ok {
-					status.brightness = v
-					shouldPrint = true
+			if _, ok := propsSet[propBrightness]; ok {
+				brightness, ok := m[propBrightness]
+				if ok {
+					if v, ok := brightness.Value().(float64); ok {
+						status.brightness = v
+						shouldPrint = true
+					}
 				}
 			}
 
 			if shouldPrint {
-				fmt.Fprintf(os.Stdout, "%d %s\n",
-					status.temperature, strconv.FormatFloat(status.brightness, 'f', 2, 64))
+				fmt.Fprintf(os.Stdout, status.Format(sb, props)+"\n")
 			}
 		}
 	}
