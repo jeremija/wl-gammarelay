@@ -84,7 +84,12 @@ type Display interface {
 	SetColor(context.Context, display.ColorParams) error
 }
 
-func NewDBus(ctx context.Context, logger log.Logger, disp Display) (*dbus.Conn, error) {
+type DBus struct {
+	conn   *dbus.Conn
+	logger log.Logger
+}
+
+func NewDBus(logger log.Logger) (*DBus, error) {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return nil, fmt.Errorf("falied to connect to dbus: %w", err)
@@ -100,95 +105,6 @@ func NewDBus(ctx context.Context, logger log.Logger, disp Display) (*dbus.Conn, 
 			return fmt.Errorf("name already taken")
 		}
 
-		data := struct {
-			temp       uint16
-			brightness float64
-		}{
-			temp:       6500,
-			brightness: 1,
-		}
-
-		propsSpec := map[string]map[string]*prop.Prop{
-			dbusInterfaceName: {
-				propTemperature: {
-					Value:    uint16(data.temp),
-					Writable: true,
-					Emit:     prop.EmitTrue,
-					Callback: func(c *prop.Change) *dbus.Error {
-						temp, _ := c.Value.(uint16)
-
-						err := disp.SetColor(ctx, display.ColorParams{
-							Temperature: int(temp),
-							Brightness:  float32(data.brightness),
-						})
-						if err != nil {
-							logger.Error("Failed to set temperature", err, nil)
-							return dbus.MakeFailedError(fmt.Errorf("failed to set color: %w", err))
-						}
-
-						data.temp = temp
-
-						return nil
-					},
-				},
-				propBrightness: {
-					Value:    float64(data.brightness),
-					Writable: true,
-					Emit:     prop.EmitTrue,
-					Callback: func(c *prop.Change) *dbus.Error {
-						bri, _ := c.Value.(float64)
-
-						err := disp.SetColor(ctx, display.ColorParams{
-							Temperature: int(data.temp),
-							Brightness:  float32(bri),
-						})
-						if err != nil {
-							logger.Error("Failed to set brightness", err, nil)
-							return dbus.MakeFailedError(fmt.Errorf("failed to set color: %w", err))
-						}
-
-						data.brightness = bri
-
-						return nil
-					},
-				},
-			},
-		}
-
-		props, err := prop.Export(conn, dbusObjectPath, propsSpec)
-		if err != nil {
-			return fmt.Errorf("export propsSpec failed: %w", err)
-		}
-
-		service := &srv{
-			props: props,
-		}
-
-		if err := conn.Export(service, dbusObjectPath, dbusInterfaceName); err != nil {
-			return fmt.Errorf("failed to register interface: %w", err)
-		}
-
-		n := &introspect.Node{
-			Name: dbusObjectPath,
-			Interfaces: []introspect.Interface{
-				introspect.IntrospectData,
-				prop.IntrospectData,
-				{
-					Name:       dbusInterfaceName,
-					Methods:    introspect.Methods(service),
-					Properties: props.Introspection(dbusInterfaceName),
-				},
-			},
-		}
-
-		if err = conn.Export(
-			introspect.NewIntrospectable(n),
-			dbusObjectPath,
-			"org.freedesktop.DBus.Introspectable",
-		); err != nil {
-			return fmt.Errorf("export introspectable failed: %w", err)
-		}
-
 		return nil
 	}
 
@@ -197,7 +113,110 @@ func NewDBus(ctx context.Context, logger log.Logger, disp Display) (*dbus.Conn, 
 		return nil, fmt.Errorf("failed to register dbus: %w", err)
 	}
 
-	return conn, nil
+	return &DBus{
+		conn:   conn,
+		logger: logger,
+	}, nil
+}
+
+func (d *DBus) RegisterDisplayService(ctx context.Context, disp Display) error {
+	logger := d.logger
+	conn := d.conn
+
+	data := struct {
+		temp       uint16
+		brightness float64
+	}{
+		temp:       6500,
+		brightness: 1,
+	}
+
+	propsSpec := map[string]map[string]*prop.Prop{
+		dbusInterfaceName: {
+			propTemperature: {
+				Value:    uint16(data.temp),
+				Writable: true,
+				Emit:     prop.EmitTrue,
+				Callback: func(c *prop.Change) *dbus.Error {
+					temp, _ := c.Value.(uint16)
+
+					err := disp.SetColor(ctx, display.ColorParams{
+						Temperature: int(temp),
+						Brightness:  float32(data.brightness),
+					})
+					if err != nil {
+						logger.Error("Failed to set temperature", err, nil)
+						return dbus.MakeFailedError(fmt.Errorf("failed to set color: %w", err))
+					}
+
+					data.temp = temp
+
+					return nil
+				},
+			},
+			propBrightness: {
+				Value:    float64(data.brightness),
+				Writable: true,
+				Emit:     prop.EmitTrue,
+				Callback: func(c *prop.Change) *dbus.Error {
+					bri, _ := c.Value.(float64)
+
+					err := disp.SetColor(ctx, display.ColorParams{
+						Temperature: int(data.temp),
+						Brightness:  float32(bri),
+					})
+					if err != nil {
+						logger.Error("Failed to set brightness", err, nil)
+						return dbus.MakeFailedError(fmt.Errorf("failed to set color: %w", err))
+					}
+
+					data.brightness = bri
+
+					return nil
+				},
+			},
+		},
+	}
+
+	props, err := prop.Export(conn, dbusObjectPath, propsSpec)
+	if err != nil {
+		return fmt.Errorf("export propsSpec failed: %w", err)
+	}
+
+	service := &srv{
+		props: props,
+	}
+
+	if err := conn.Export(service, dbusObjectPath, dbusInterfaceName); err != nil {
+		return fmt.Errorf("failed to register interface: %w", err)
+	}
+
+	n := &introspect.Node{
+		Name: dbusObjectPath,
+		Interfaces: []introspect.Interface{
+			introspect.IntrospectData,
+			prop.IntrospectData,
+			{
+				Name:       dbusInterfaceName,
+				Methods:    introspect.Methods(service),
+				Properties: props.Introspection(dbusInterfaceName),
+			},
+		},
+	}
+
+	if err = conn.Export(
+		introspect.NewIntrospectable(n),
+		dbusObjectPath,
+		"org.freedesktop.DBus.Introspectable",
+	); err != nil {
+		return fmt.Errorf("export introspectable failed: %w", err)
+	}
+
+	return nil
+}
+
+func (d *DBus) Close() error {
+	return d.conn.Close()
 }
 
 type Subscriber struct {

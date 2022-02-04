@@ -51,11 +51,13 @@ func parseArgs(argsSlice []string) (Arguments, error) {
 func main() {
 	args, err := parseArgs(os.Args)
 	if err != nil {
-		panic(err)
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
 	}
 
 	if err := main2(args); err != nil {
-		panic(err)
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(2)
 	}
 }
 
@@ -100,12 +102,16 @@ func main2(args Arguments) error {
 
 	defer disp.Close()
 
-	conn, err := NewDBus(ctx, logger, disp)
+	conn, err := NewDBus(logger)
 	if err != nil {
 		return fmt.Errorf("failed to connect to dbus: %w", err)
 	}
 
 	defer conn.Close()
+
+	if err := conn.RegisterDisplayService(ctx, disp); err != nil {
+		return fmt.Errorf("failed to initialize display service")
+	}
 
 	<-ctx.Done()
 
