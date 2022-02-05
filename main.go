@@ -95,19 +95,19 @@ func main2(args Arguments) error {
 		return NewSubscriber(ctx, args.Subscribe)
 	}
 
-	disp, err := display.New(logger)
-	if err != nil {
-		return fmt.Errorf("failed to open display: %w", err)
-	}
-
-	defer disp.Close()
-
 	conn, err := NewDBus(logger)
 	if err != nil {
 		return fmt.Errorf("failed to connect to dbus: %w", err)
 	}
 
 	defer conn.Close()
+
+	disp, err := display.New(logger)
+	if err != nil {
+		return fmt.Errorf("failed to open display: %w", err)
+	}
+
+	defer disp.Close()
 
 	if err := conn.RegisterDisplayService(ctx, disp); err != nil {
 		return fmt.Errorf("failed to initialize display service")
