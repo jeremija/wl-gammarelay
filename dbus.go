@@ -39,15 +39,9 @@ func (s *srv) UpdateTemperature(temperature int16) (err *dbus.Error) {
 		return err
 	}
 
-	var value uint16
-
-	switch t := v.Value().(type) {
-	case uint16:
-		value = t
-	case *uint16:
-		value = *t
-	default:
-		return dbus.MakeFailedError(fmt.Errorf("value is not int16: %T", v.Value()))
+	value, ok := v.Value().(uint16)
+	if !ok {
+		return dbus.MakeFailedError(fmt.Errorf("value is not uint16: %T", v.Value()))
 	}
 
 	value = uint16(int16(value) + temperature)
@@ -64,14 +58,8 @@ func (s *srv) UpdateBrightness(brightness float64) (err *dbus.Error) {
 		return err
 	}
 
-	var value float64
-
-	switch t := v.Value().(type) {
-	case float64:
-		value = t
-	case *float64:
-		value = *t
-	default:
+	value, ok := v.Value().(float64)
+	if !ok {
 		return dbus.MakeFailedError(fmt.Errorf("value is not double: %T", v.Value()))
 	}
 
