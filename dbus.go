@@ -254,7 +254,7 @@ func NewSubscriber(ctx context.Context, props []string) error {
 	obj := conn.Object(dbusServiceName, dbusObjectPath)
 
 	call := conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0,
-		"eavesdrop='true',type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='"+dbusObjectPath+"'")
+		"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='"+dbusObjectPath+"'")
 	if call.Err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to add match:", call.Err)
 		os.Exit(1)
