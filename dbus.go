@@ -30,42 +30,52 @@ type srv struct {
 	props *prop.Properties
 }
 
-func (s *srv) UpdateTemperature(temperature int16) (err *dbus.Error) {
+func (s *srv) UpdateTemperature(temperature int16) (uint16, *dbus.Error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	v, err := s.props.Get(dbusInterfaceName, propTemperature)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	value, ok := v.Value().(uint16)
 	if !ok {
-		return dbus.MakeFailedError(fmt.Errorf("value is not uint16: %T", v.Value()))
+		return value, dbus.MakeFailedError(fmt.Errorf("value is not uint16: %T", v.Value()))
 	}
 
 	value = uint16(int16(value) + temperature)
 
-	return s.props.Set(dbusInterfaceName, propTemperature, dbus.MakeVariant(value))
+	err = s.props.Set(dbusInterfaceName, propTemperature, dbus.MakeVariant(value))
+	if err != nil {
+		return 0, err
+	}
+
+	return value, nil
 }
 
-func (s *srv) UpdateBrightness(brightness float64) (err *dbus.Error) {
+func (s *srv) UpdateBrightness(brightness float64) (float64, *dbus.Error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	v, err := s.props.Get(dbusInterfaceName, propBrightness)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	value, ok := v.Value().(float64)
 	if !ok {
-		return dbus.MakeFailedError(fmt.Errorf("value is not double: %T", v.Value()))
+		return 0, dbus.MakeFailedError(fmt.Errorf("value is not double: %T", v.Value()))
 	}
 
 	value += brightness
 
-	return s.props.Set(dbusInterfaceName, propBrightness, dbus.MakeVariant(value))
+	err = s.props.Set(dbusInterfaceName, propBrightness, dbus.MakeVariant(value))
+	if err != nil {
+		return 0, err
+	}
+
+	return value, nil
 }
 
 type Display interface {
